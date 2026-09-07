@@ -1,0 +1,37 @@
+{
+  "name": "theta-engine",
+  "version": "0.1.0",
+  "description": "Declarative schema-driven intake runtime and progressive question engine",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./contracts": "./src/contracts.js",
+    "./engine": "./src/engine.js",
+    "./path": "./src/path.js",
+    "./predicates": "./src/predicates.js",
+    "./scope": "./src/scope.js",
+    "./branches": "./src/branches.js",
+    "./transaction": "./src/transaction.js",
+    "./projections": "./src/projections.js",
+    "./storage": "./src/storage.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:watch": "node --test --watch tests/*.test.js"
+  },
+  "keywords": [
+    "theta",
+    "intake-engine",
+    "schema-driven",
+    "form-engine",
+    "declarative-ui",
+    "progressive-disclosure",
+    "state-machine"
+  ],
+  "author": "Anmol Maniyar",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
