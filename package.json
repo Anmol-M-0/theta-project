@@ -1,24 +1,67 @@
 {
   "name": "theta-engine",
   "version": "0.1.0",
-  "description": "Declarative schema-driven intake runtime and progressive question engine",
+  "description": "Deterministic schema-driven intake runtime and progressive question engine",
   "type": "module",
-  "main": "./src/index.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js",
-    "./contracts": "./src/contracts.js",
-    "./engine": "./src/engine.js",
-    "./path": "./src/path.js",
-    "./predicates": "./src/predicates.js",
-    "./scope": "./src/scope.js",
-    "./branches": "./src/branches.js",
-    "./transaction": "./src/transaction.js",
-    "./projections": "./src/projections.js",
-    "./storage": "./src/storage.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./storage": {
+      "types": "./dist/storage.d.ts",
+      "default": "./dist/storage.js"
+    },
+    "./engine": {
+      "types": "./dist/engine.d.ts",
+      "default": "./dist/engine.js"
+    },
+    "./path": {
+      "types": "./dist/path.d.ts",
+      "default": "./dist/path.js"
+    },
+    "./predicates": {
+      "types": "./dist/predicates.d.ts",
+      "default": "./dist/predicates.js"
+    },
+    "./scope": {
+      "types": "./dist/scope.d.ts",
+      "default": "./dist/scope.js"
+    },
+    "./branches": {
+      "types": "./dist/branches.d.ts",
+      "default": "./dist/branches.js"
+    },
+    "./transaction": {
+      "types": "./dist/transaction.d.ts",
+      "default": "./dist/transaction.js"
+    },
+    "./projections": {
+      "types": "./dist/projections.d.ts",
+      "default": "./dist/projections.js"
+    },
+    "./package.json": "./package.json"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "build": "npm run clean && npm run build:types && npm run build:js",
+    "clean": "rm -rf dist",
+    "build:types": "tsc",
+    "build:js": "mkdir -p dist && cp src/*.js dist/",
     "test": "node --test tests/*.test.js",
-    "test:watch": "node --test --watch tests/*.test.js"
+    "test:watch": "node --test --watch tests/*.test.js",
+    "prepack": "npm run build",
+    "build:playground": "node scripts/bundle-playground.mjs"
   },
   "keywords": [
     "theta",
@@ -27,11 +70,16 @@
     "form-engine",
     "declarative-ui",
     "progressive-disclosure",
-    "state-machine"
+    "state-machine",
+    "legal-tech",
+    "zero-dependency"
   ],
-  "author": "Anmol Maniyar (Anmol-M-0)",
+  "author": "Anmol Maniyar",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }

@@ -130,6 +130,69 @@ export function createThetaEngine(config) {
     }
 
     switch (command.type) {
+      case "COMMIT_ANSWER": {
+        const { questionId, value } = command;
+        let targetPath = command.path;
+
+        if (!targetPath && questionId) {
+          const allQuestions = schema.sections.flatMap((s) => s.questions);
+          const qDef = allQuestions.find((q) => q.id === questionId);
+          if (qDef) {
+            targetPath = qDef.path;
+          }
+        }
+
+        if (!targetPath) {
+          throw new Error(`Cannot commit answer: questionId "${questionId}" or path must be specified`);
+        }
+
+        const res = commitFactTransaction(
+          schema,
+          state,
+          targetPath,
+          value,
+          command.explicitInvalidates || [],
+          scopeStack
+        );
+        state = res.state;
+
+        if (activeCursorId === questionId) {
+          activeCursorId = null;
+          returnTo = null;
+        }
+
+        persistAsync();
+        notify("commit_answer");
+        return { ok: true, state: getState(), changedPaths: res.changedPaths };
+      }
+
+      case "JUMP_TO_QUESTION": {
+        activeCursorId = command.questionId;
+        returnTo = command.returnTo || "review";
+        if (command.scopeStack instanceof ScopeStack) {
+          scopeStack = command.scopeStack;
+        }
+        notify("cursor");
+        return { ok: true };
+      }
+
+      case "DELETE_ANSWER": {
+        const { questionId } = command;
+        let targetPath = command.path;
+        if (!targetPath && questionId) {
+          const allQuestions = schema.sections.flatMap((s) => s.questions);
+          const qDef = allQuestions.find((q) => q.id === questionId);
+          if (qDef) targetPath = qDef.path;
+        }
+        if (!targetPath) {
+          throw new Error(`Cannot delete answer: questionId "${questionId}" or path must be specified`);
+        }
+        const res = deleteFactTransaction(schema, state, targetPath, scopeStack);
+        state = res.state;
+        persistAsync();
+        notify("delete_answer");
+        return { ok: true, state: getState(), changedPaths: res.changedPaths };
+      }
       case "SET_FACT": {
         const { path, value, explicitInvalidates } = command;
         const res = commitFactTransaction(

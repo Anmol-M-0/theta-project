@@ -131,6 +131,7 @@ export function resolveActiveQuestion(schema, facts, scopeStack = new ScopeStack
   }
 
   return {
+    id: q.id,
     questionId: q.id,
     sectionId: currentItem.sectionId,
     sectionTitle: currentItem.sectionTitle,
@@ -139,6 +140,7 @@ export function resolveActiveQuestion(schema, facts, scopeStack = new ScopeStack
     label: q.label,
     description: q.description,
     value: value ?? null,
+    currentValue: value ?? null,
     options: q.options ? [...q.options] : undefined,
     required: isRequired,
     isAnswered: false,
@@ -173,6 +175,7 @@ export function buildQuestionProjectionById(schema, facts, questionId, scopeStac
       }
 
       return {
+        id: q.id,
         questionId: q.id,
         sectionId: section.id,
         sectionTitle: section.title,
@@ -181,6 +184,7 @@ export function buildQuestionProjectionById(schema, facts, questionId, scopeStac
         label: q.label,
         description: q.description,
         value: value ?? null,
+        currentValue: value ?? null,
         options: q.options ? [...q.options] : undefined,
         required: isRequired,
         isAnswered: isQuestionAnswered(q, facts, scopeStack),
@@ -218,10 +222,13 @@ export function buildReviewTree(schema, facts, rootScopeStack = new ScopeStack()
       if (!isEligible) {
         questionNodes.push({
           id: q.id,
+          questionId: q.id,
           kind: "question",
           label: q.label,
           path: q.path,
           status: "not-applicable",
+          answered: false,
+          eligible: false,
         });
         continue;
       }
@@ -245,13 +252,15 @@ export function buildReviewTree(schema, facts, rootScopeStack = new ScopeStack()
 
       questionNodes.push({
         id: q.id,
+        questionId: q.id,
         kind: "question",
         label: q.label,
         path: resolvedPath,
         value,
-        questionId: q.id,
         scope: rootScopeStack.toArray(),
         status: answered ? "complete" : "incomplete",
+        answered,
+        eligible: true,
       });
     }
 
@@ -259,8 +268,12 @@ export function buildReviewTree(schema, facts, rootScopeStack = new ScopeStack()
       id: section.id,
       kind: "section",
       label: section.title,
+      title: section.title,
       status: questionNodes.some((n) => n.status === "incomplete") ? "incomplete" : "complete",
       children: questionNodes,
+      questions: questionNodes,
+      completedCount: questionNodes.filter((n) => n.status === "complete").length,
+      eligibleCount: questionNodes.filter((n) => n.status !== "not-applicable").length,
     });
   }
 
@@ -269,6 +282,8 @@ export function buildReviewTree(schema, facts, rootScopeStack = new ScopeStack()
     stats: {
       total: totalCount,
       complete: completeCount,
+      completed: completeCount,
+      totalEligible: totalCount,
       blockers: blockerCount,
     },
   };

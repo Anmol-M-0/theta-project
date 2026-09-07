@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Theta Engine • Interactive Playground & Schema Studio</title>
+  <meta name="description" content="Deterministic schema-driven intake runtime and progressive question engine. Zero runtime dependencies. Universal across Node.js, Deno, and Bun.">
+  
+  <!-- Modern Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+  <!-- Top Navigation & Control Bar -->
+  <header class="app-header">
+    <div class="brand-wrapper">
+      <div class="brand-logo">θ</div>
+      <div>
+        <h1 class="brand-title">Theta Engine</h1>
+      </div>
+      <span class="badge-pill">v0.1.0 • Pure ESM</span>
+    </div>
+
+    <div class="header-controls">
+      <span class="schema-select-label">Intake Schema:</span>
+      <select id="schemaSelect" class="select-control">
+        <option value="conveyance">Indian Conveyance Deed (Complex Legal Drafting)</option>
+        <option value="notice138">Section 138 NI Act Notice (Statutory Banking Demand)</option>
+        <option value="branching">Atomic Branch Invalidation Demo</option>
+      </select>
+
+      <button id="btnFillSample" class="btn-header">⚡ Fill Demo Data</button>
+      <button id="btnResetState" class="btn-header">↺ Reset</button>
+      <button id="btnCopyJson" class="btn-header primary">⎘ Copy Facts</button>
+      <a href="https://github.com/Anmol-M-0/theta-project" target="_blank" rel="noopener" class="btn-header">
+        GitHub ↗
+      </a>
+    </div>
+  </header>
+
+  <!-- Main 3-Column Interactive Workspace -->
+  <main class="main-container">
+
+    <!-- Column 1: Progressive Intake View (The View Projection) -->
+    <section class="panel panel-intake" aria-label="Progressive Intake Screen">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="dot"></span>
+          <span>1. Progressive Intake View</span>
+        </div>
+        <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+          [Questions are Projections]
+        </span>
+      </div>
+
+      <div class="panel-body">
+        <div class="progress-bar-container">
+          <div class="progress-metrics">
+            <span id="progressStepTitle">Overall Progress</span>
+            <span id="progressMetrics">0 of 0 Answered (0%)</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+        </div>
+
+        <div id="intakePanelBody">
+          <!-- Dynamically populated by playground.js -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Column 2: Canonical Facts Inspector (The Draft is Truth) -->
+    <section class="panel panel-facts" aria-label="Canonical Facts Inspector">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="dot" style="background: var(--cyan-400); box-shadow: 0 0 8px var(--cyan-400);"></span>
+          <span>2. Canonical Facts JSON</span>
+        </div>
+        <div class="facts-meta" style="margin-top:0;">
+          <span id="revBadge">Revision: 0</span>
+        </div>
+      </div>
+
+      <div class="panel-body" style="display: flex; flex-direction: column;">
+        <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">
+          The single authoritative state. Inputs are projections over these paths:
+        </div>
+        <pre class="code-inspector" id="factsJsonViewer">{}</pre>
+        
+        <div class="facts-meta">
+          <span>In-Memory Size: <strong id="factsSizeBadge">2 bytes</strong></span>
+          <span>Single-Writer Serial</span>
+        </div>
+
+        <div class="log-feed">
+          <div class="log-title">Recent Transactions & Branch Events</div>
+          <div id="logFeed">
+            <!-- Dynamic logs -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Column 3: Master Review Tree Projection -->
+    <section class="panel panel-review" aria-label="Master Review Projection">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="dot" style="background: var(--indigo-400); box-shadow: 0 0 8px var(--indigo-400);"></span>
+          <span>3. Master Review Projection</span>
+        </div>
+        <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+          [One-Click Edit Jumps]
+        </span>
+      </div>
+
+      <div class="panel-body" id="reviewTreeContainer">
+        <!-- Dynamically populated sections & review items -->
+      </div>
+    </section>
+
+  </main>
+
+  <script type="module" src="./playground.js"></script>
+</body>
+</html>
