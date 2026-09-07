@@ -1,6 +1,6 @@
 {
   "name": "theta-engine",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "Deterministic schema-driven intake runtime and progressive question engine",
   "type": "module",
   "main": "./dist/index.js",
@@ -21,6 +21,30 @@
     "./dag": {
       "types": "./dist/dag.d.ts",
       "default": "./dist/dag.js"
+    },
+    "./canonical": {
+      "types": "./dist/canonical.d.ts",
+      "default": "./dist/canonical.js"
+    },
+    "./diagnostics": {
+      "types": "./dist/diagnostics.d.ts",
+      "default": "./dist/diagnostics.js"
+    },
+    "./migration": {
+      "types": "./dist/migration.d.ts",
+      "default": "./dist/migration.js"
+    },
+    "./history": {
+      "types": "./dist/history.d.ts",
+      "default": "./dist/history.js"
+    },
+    "./adapter": {
+      "types": "./dist/adapter.d.ts",
+      "default": "./dist/adapter.js"
+    },
+    "./codegen": {
+      "types": "./dist/codegen.d.ts",
+      "default": "./dist/codegen.js"
     },
     "./storage": {
       "types": "./dist/storage.d.ts",
@@ -82,7 +106,12 @@
     "state-machine",
     "legal-tech",
     "zero-dependency",
-    "dependency-dag"
+    "dependency-dag",
+    "diagnostics",
+    "time-travel",
+    "migration",
+    "adapters",
+    "codegen"
   ],
   "author": "Anmol Maniyar",
   "license": "MIT",
