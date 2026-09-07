@@ -6,3 +6,5 @@ yarn-error.log*
 *.swp
 coverage/
 .dist/
+.chatgpt-automation-runs
+docs/*
