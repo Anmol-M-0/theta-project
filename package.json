@@ -29,7 +29,7 @@
     "progressive-disclosure",
     "state-machine"
   ],
-  "author": "Anmol Maniyar",
+  "author": "Anmol Maniyar (Anmol-M-0)",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
