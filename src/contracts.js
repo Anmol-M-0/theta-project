@@ -1,33 +1,18 @@
 /**
  * @file contracts.js
- * @description Core types and schema contracts for the Theta Engine.
- * Theta is a zero-dependency, standalone schema-driven intake runtime.
+ * @description Core types, schemas, and interface definitions for Theta.
  */
 
 /**
- * @typedef {string | number | boolean | null | FactValue[] | { [key: string]: FactValue }} FactValue
- */
-
-/**
- * @typedef {Record<string, FactValue>} FactState
- */
-
-/**
- * @typedef {Object} IntakeState
- * @property {FactState} facts - Canonical document fact model
- * @property {number} revision - Monotonically increasing state version
- */
-
-/**
- * @typedef {'text' | 'number' | 'currency' | 'date' | 'select' | 'radio' | 'checkbox' | 'card' | 'repeater'} QuestionKind
+ * @typedef {'text' | 'number' | 'boolean' | 'date' | 'select' | 'multiselect' | 'card' | 'address' | 'currency' | 'pan' | 'aadhaar' | 'cin' | 'repeater'} QuestionKind
  */
 
 /**
  * @typedef {Object} OptionDefinition
- * @property {string | number} value
+ * @property {string | number | boolean} value
  * @property {string} label
  * @property {string} [description]
- * @property {string} [hint]
+ * @property {string} [icon]
  */
 
 /**
@@ -60,6 +45,12 @@
  */
 
 /**
+ * @typedef {Object} IntakeState
+ * @property {Record<string, unknown>} facts - The canonical document data tree
+ * @property {number} revision - Monotonically increasing revision counter
+ */
+
+/**
  * @typedef {Object} QuestionDefinition
  * @property {string} id - Stable unique identifier
  * @property {string} sectionId - Top-level section identifier
@@ -73,7 +64,8 @@
  * @property {string[]} [prerequisites] - Paths that must have values before this question is eligible
  * @property {string[]} [invalidates] - Paths cleared if this answer changes
  * @property {string} [branch] - Branch identifier this question belongs to
- * @property {(value: unknown, state: IntakeState) => true | string} [validate] - Custom validator function
+ * @property {string} [scope] - Scope name (if declared inside a repeater)
+ * @property {(value: unknown, state: IntakeState) => true | string | boolean} [validate] - Custom validator function
  */
 
 /**
@@ -99,7 +91,8 @@
  * @property {string} itemLabel - Singular item label
  * @property {number} [minItems]
  * @property {number} [maxItems]
- * @property {() => Record<string, unknown>} createItem - Factory for empty item
+ * @property {() => Record<string, unknown>} [createItem] - Factory for empty item
+ * @property {QuestionDefinition[]} [questions] - Questions belonging to this repeater item
  */
 
 /**
@@ -115,7 +108,7 @@
  * @typedef {Object} ScopeFrame
  * @property {string} name - Scope variable name (e.g. 'party', 'director')
  * @property {number} index - Active index in collection
- * @property {string} [id] - Optional entity id
+ * @property {string} [id] - Stable entity id
  */
 
 /**
@@ -126,20 +119,27 @@
  */
 
 /**
- * @typedef {Object} QuestionProjection
- * @property {string} questionId
+ * @typedef {Object} QuestionInstance
+ * @property {string} id - Composite unique instance id (e.g. 'seller_name@seller_123' or 'prop_category')
+ * @property {string} questionId - Base question definition id
  * @property {string} sectionId
  * @property {string} sectionTitle
- * @property {string} path
+ * @property {string} path - Fully resolved path in facts (e.g. 'sellers[0].name')
  * @property {QuestionKind} kind
  * @property {string} label
  * @property {string} [description]
  * @property {unknown} value
+ * @property {unknown} [currentValue]
  * @property {OptionDefinition[]} [options]
  * @property {boolean} required
  * @property {boolean} isAnswered
  * @property {{ current: number, total: number }} progress
  * @property {ScopeFrame[]} scope
+ * @property {QuestionDefinition} question
+ */
+
+/**
+ * @typedef {QuestionInstance} QuestionProjection
  */
 
 /**
@@ -147,16 +147,22 @@
  * @property {string} id
  * @property {'section' | 'question' | 'repeater' | 'repeater-item'} kind
  * @property {string} label
+ * @property {string} [title]
  * @property {string} [path]
  * @property {unknown} [value]
  * @property {'complete' | 'incomplete' | 'not-applicable'} status
  * @property {string} [questionId]
  * @property {ScopeFrame[]} [scope]
+ * @property {boolean} [answered]
+ * @property {boolean} [eligible]
  * @property {ReviewNode[]} [children]
+ * @property {ReviewNode[]} [questions]
+ * @property {number} [completedCount]
+ * @property {number} [eligibleCount]
  */
 
 /**
  * @typedef {Object} ReviewTree
  * @property {ReviewNode[]} sections
- * @property {{ total: number, complete: number, blockers: number }} stats
+ * @property {{ total: number, complete: number, completed: number, totalEligible: number, blockers: number }} stats
  */

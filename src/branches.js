@@ -1,10 +1,10 @@
 /**
  * @file branches.js
- * @description Branch ownership tracking and atomic invalidation planner for Theta.
+ * @description Branch ownership tracking and fixed-point cascading atomic invalidation planner for Theta.
  */
 
 import { evaluatePredicate } from "./predicates.js";
-import { deleteAt } from "./path.js";
+import { getAt, deleteAt } from "./path.js";
 
 /**
  * @typedef {import('./contracts.js').BranchDefinition} BranchDefinition
@@ -13,8 +13,24 @@ import { deleteAt } from "./path.js";
  */
 
 /**
+ * Checks if a path or value exists in the facts object.
+ * @param {Record<string, unknown>} facts
+ * @param {string} path
+ * @param {ScopeStack} [scopeStack]
+ * @returns {boolean}
+ */
+export function hasFact(facts, path, scopeStack) {
+  return getAt(facts, path, scopeStack) !== undefined;
+}
+
+/**
  * Calculates which paths should be purged when transitioning from oldFacts to newFacts.
- * Checks both schema branch activations and question-level explicit invalidates.
+ * Implements fixed-point iterative evaluation to correctly handle cascading branch invalidations
+ * (e.g., deactivating Branch A purges facts that cause Branch B to deactivate).
+ * Evaluates branches in topological order when available for fast, deterministic convergence.
+ *
+ * Invariant: inactive branch => none of its owned facts exist in state.
+ *
  * @param {IntakeSchema} schema
  * @param {Record<string, unknown>} oldFacts
  * @param {Record<string, unknown>} newFacts
@@ -23,27 +39,59 @@ import { deleteAt } from "./path.js";
  * @returns {string[]} Paths to delete
  */
 export function planInvalidations(schema, oldFacts, newFacts, explicitInvalidations = [], scopeStack) {
-  const pathsToClear = new Set(explicitInvalidations);
+  const allInvalidated = new Set(explicitInvalidations);
 
-  if (!schema.branches || !Array.isArray(schema.branches)) {
-    return Array.from(pathsToClear);
+  const branches = schema.branches || [];
+  if (!Array.isArray(branches) || branches.length === 0) {
+    return Array.from(allInvalidated);
   }
 
-  for (const branch of schema.branches) {
-    if (!branch.activation) continue;
+  let workingFacts = applyInvalidations(newFacts, Array.from(allInvalidated), scopeStack);
 
-    const wasActive = evaluatePredicate(branch.activation, { facts: oldFacts, scope: scopeStack });
-    const isActive = evaluatePredicate(branch.activation, { facts: newFacts, scope: scopeStack });
+  // If topologicalOrder is compiled on schema or schema.dag, order branch evaluation topologically
+  const topologicalOrder = schema.dag?.topologicalOrder || schema.topologicalOrder || null;
+  const branchMap = new Map(branches.map((b) => [b.id, b]));
 
-    // Branch transitioned from active to inactive: purge all owned paths!
-    if (wasActive && !isActive) {
-      for (const ownedPath of branch.ownedPaths) {
-        pathsToClear.add(ownedPath);
+  const evaluationList = topologicalOrder
+    ? topologicalOrder.map((id) => branchMap.get(id)).filter(Boolean)
+    : branches;
+
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = evaluationList.length + 2;
+
+  while (changed && iterations < maxIterations) {
+    changed = false;
+    iterations++;
+
+    for (const branch of evaluationList) {
+      if (!branch.activation || !branch.ownedPaths || !branch.ownedPaths.length) continue;
+
+      const wasActiveInOld = evaluatePredicate(branch.activation, { facts: oldFacts, scope: scopeStack });
+      const hasFactsInWorking = branch.ownedPaths.some((p) => hasFact(workingFacts, p, scopeStack));
+
+      // If branch was previously active OR currently has facts in state
+      if (wasActiveInOld || hasFactsInWorking) {
+        const isActiveNow = evaluatePredicate(branch.activation, { facts: workingFacts, scope: scopeStack });
+
+        // Branch is now inactive: purge all owned paths!
+        if (!isActiveNow) {
+          for (const ownedPath of branch.ownedPaths) {
+            if (!allInvalidated.has(ownedPath)) {
+              allInvalidated.add(ownedPath);
+              changed = true;
+            }
+          }
+        }
       }
+    }
+
+    if (changed) {
+      workingFacts = applyInvalidations(newFacts, Array.from(allInvalidated), scopeStack);
     }
   }
 
-  return Array.from(pathsToClear);
+  return Array.from(allInvalidated);
 }
 
 /**
@@ -54,7 +102,7 @@ export function planInvalidations(schema, oldFacts, newFacts, explicitInvalidati
  * @returns {Record<string, unknown>}
  */
 export function applyInvalidations(facts, invalidationPaths, scopeStack) {
-  if (!invalidationPaths.length) return facts;
+  if (!invalidationPaths || !invalidationPaths.length) return facts;
 
   let current = facts;
   for (const path of invalidationPaths) {

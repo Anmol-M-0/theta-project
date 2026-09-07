@@ -34,6 +34,7 @@ export function tokenizePath(path) {
 
 /**
  * Resolves scope tokens in an array of PathTokens using an active ScopeStack.
+ * If a scope frame is not found in the stack, preserves the scope token to enable collection-wide matching.
  * @param {PathToken[]} tokens
  * @param {import('./scope.js').ScopeStack} [scopeStack]
  * @returns {PathToken[]}
@@ -43,14 +44,14 @@ export function resolveTokens(tokens, scopeStack) {
     if (token.type !== "scope") return token;
 
     if (!scopeStack) {
-      throw new Error(`Cannot resolve scope token '$${token.value}' without an active ScopeStack`);
+      return token;
     }
 
     const scopeName = String(token.value);
     const frame = scopeName === "current" ? scopeStack.current() : scopeStack.get(scopeName);
 
     if (!frame) {
-      throw new Error(`Scope token '$${scopeName}' not found in active ScopeStack`);
+      return token;
     }
 
     return { type: "index", value: frame.index };
@@ -87,6 +88,7 @@ export function resolvePath(path, scopeStack) {
 
 /**
  * Immutably reads a value from a target object using tokens or a path string.
+ * Supports collection-wide wildcards for unscoped tokens.
  * @param {unknown} root
  * @param {string | PathToken[]} pathOrTokens
  * @param {import('./scope.js').ScopeStack} [scopeStack]
@@ -97,20 +99,32 @@ export function getAt(root, pathOrTokens, scopeStack) {
   const rawTokens = Array.isArray(pathOrTokens) ? pathOrTokens : tokenizePath(pathOrTokens);
   const tokens = resolveTokens(rawTokens, scopeStack);
 
-  let current = root;
-  for (const token of tokens) {
-    if (current == null) return undefined;
+  function read(node, tokenIdx) {
+    if (node == null) return undefined;
+    if (tokenIdx >= tokens.length) return node;
 
+    const token = tokens[tokenIdx];
     if (token.type === "key") {
-      if (typeof current !== "object") return undefined;
-      current = current[token.value];
-    } else if (token.type === "index") {
-      if (!Array.isArray(current)) return undefined;
-      current = current[token.value];
+      if (typeof node !== "object" || Array.isArray(node)) return undefined;
+      return read(node[token.value], tokenIdx + 1);
     }
+    if (token.type === "index") {
+      if (!Array.isArray(node)) return undefined;
+      return read(node[token.value], tokenIdx + 1);
+    }
+    if (token.type === "scope") {
+      // Unresolved scope token: check if any item in the array has the child property
+      if (!Array.isArray(node)) return undefined;
+      for (const item of node) {
+        const res = read(item, tokenIdx + 1);
+        if (res !== undefined) return res;
+      }
+      return undefined;
+    }
+    return undefined;
   }
 
-  return current;
+  return read(root, 0);
 }
 
 /**
@@ -127,6 +141,13 @@ export function setAt(root, pathOrTokens, value, scopeStack) {
   const tokens = resolveTokens(rawTokens, scopeStack);
 
   if (!tokens.length) return value;
+
+  const unresolved = tokens.find((t) => t.type === "scope");
+  if (unresolved) {
+    throw new Error(
+      `Cannot write to scoped path containing unresolved token '$${unresolved.value}' without an active ScopeStack`
+    );
+  }
 
   function update(node, tokenIdx) {
     if (tokenIdx >= tokens.length) return value;
@@ -155,6 +176,7 @@ export function setAt(root, pathOrTokens, value, scopeStack) {
 /**
  * Immutably deletes a path from a root object using structural copy.
  * Leaves the original object untouched and returns a new root.
+ * Supports collection-wide wildcards for unscoped tokens.
  * @param {unknown} root
  * @param {string | PathToken[]} pathOrTokens
  * @param {import('./scope.js').ScopeStack} [scopeStack]
@@ -170,6 +192,7 @@ export function deleteAt(root, pathOrTokens, scopeStack) {
 
   function remove(node, tokenIdx) {
     if (node == null) return node;
+    if (tokenIdx >= tokens.length) return node;
 
     const token = tokens[tokenIdx];
     const isLast = tokenIdx === tokens.length - 1;
@@ -180,7 +203,6 @@ export function deleteAt(root, pathOrTokens, scopeStack) {
       if (idx < 0 || idx >= node.length) return node;
 
       if (isLast) {
-        // Delete item at index
         const copy = [...node];
         copy.splice(idx, 1);
         return copy;
@@ -189,6 +211,12 @@ export function deleteAt(root, pathOrTokens, scopeStack) {
       const copy = [...node];
       copy[idx] = remove(copy[idx], tokenIdx + 1);
       return copy;
+    }
+
+    if (token.type === "scope") {
+      // Unresolved scope token: apply deletion across all items in array
+      if (!Array.isArray(node)) return node;
+      return node.map((item) => remove(item, tokenIdx + 1));
     }
 
     // Key token

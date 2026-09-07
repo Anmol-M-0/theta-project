@@ -14,7 +14,7 @@ import { planInvalidations, applyInvalidations } from "./branches.js";
 
 /**
  * Executes an atomic mutation on the intake state:
- * Sets fact -> Calculates & applies branch invalidations -> Increments revision.
+ * Sets fact -> Calculates & applies cascading branch invalidations -> Increments revision.
  * @param {IntakeSchema} schema
  * @param {IntakeState} currentState
  * @param {string} path
@@ -43,13 +43,14 @@ export function commitFactTransaction(
   );
 
   const finalFacts = applyInvalidations(mutatedFacts, invalidatedPaths, scopeStack);
+  const changedPaths = Array.from(new Set([path, ...invalidatedPaths]));
 
   return {
     state: {
       facts: finalFacts,
       revision: (currentState.revision || 0) + 1,
     },
-    changedPaths: [path],
+    changedPaths,
     invalidatedPaths,
   };
 }
@@ -64,14 +65,25 @@ export function commitFactTransaction(
  */
 export function deleteFactTransaction(schema, currentState, path, scopeStack) {
   const oldFacts = currentState.facts;
-  const finalFacts = deleteAt(oldFacts, path, scopeStack);
+  const mutatedFacts = deleteAt(oldFacts, path, scopeStack);
+
+  const invalidatedPaths = planInvalidations(
+    schema,
+    oldFacts,
+    mutatedFacts,
+    [path],
+    scopeStack
+  );
+
+  const finalFacts = applyInvalidations(mutatedFacts, invalidatedPaths, scopeStack);
+  const changedPaths = Array.from(new Set([path, ...invalidatedPaths]));
 
   return {
     state: {
       facts: finalFacts,
       revision: (currentState.revision || 0) + 1,
     },
-    changedPaths: [path],
-    invalidatedPaths: [],
+    changedPaths,
+    invalidatedPaths,
   };
 }

@@ -82,4 +82,34 @@ describe("Theta Path Subsystem", () => {
     assert.equal(updated.seller.pan, undefined);
     assert.equal(updated.seller.name, "Test");
   });
+
+  test("unscoped getAt and deleteAt operate across all array collection items", () => {
+    const data = {
+      partners: [
+        { name: "Partner 1", din: "DIN-1" },
+        { name: "Partner 2", din: "DIN-2" },
+        { name: "Partner 3" },
+      ],
+    };
+
+    // getAt without ScopeStack finds if any partner has a DIN
+    assert.equal(getAt(data, "partners[$partner].din"), "DIN-1");
+
+    // deleteAt without ScopeStack deletes din from all partners
+    const cleaned = deleteAt(data, "partners[$partner].din");
+    assert.equal(cleaned.partners.length, 3);
+    assert.equal(cleaned.partners[0].din, undefined);
+    assert.equal(cleaned.partners[1].din, undefined);
+    assert.equal(cleaned.partners[0].name, "Partner 1");
+    assert.equal(cleaned.partners[1].name, "Partner 2");
+    assert.equal(cleaned.partners[2].name, "Partner 3");
+  });
+
+  test("setAt throws descriptive error if attempting to write with unresolved scope token", () => {
+    const data = { partners: [] };
+    assert.throws(
+      () => setAt(data, "partners[$partner].name", "Alice"),
+      /Cannot write to scoped path containing unresolved token '\$partner'/
+    );
+  });
 });

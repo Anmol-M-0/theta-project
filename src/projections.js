@@ -1,9 +1,9 @@
 /**
  * @file projections.js
- * @description View model projections (Active Question & Master Review Tree) for Theta.
+ * @description Pure derived views and question resolvers for Theta Engine.
  */
 
-import { getAt, resolvePath } from "./path.js";
+import { getAt, resolvePath, tokenizePath } from "./path.js";
 import { evaluatePredicate, isPresent } from "./predicates.js";
 import { ScopeStack } from "./scope.js";
 
@@ -11,10 +11,36 @@ import { ScopeStack } from "./scope.js";
  * @typedef {import('./contracts.js').IntakeSchema} IntakeSchema
  * @typedef {import('./contracts.js').QuestionDefinition} QuestionDefinition
  * @typedef {import('./contracts.js').QuestionProjection} QuestionProjection
+ * @typedef {import('./contracts.js').QuestionInstance} QuestionInstance
  * @typedef {import('./contracts.js').ReviewTree} ReviewTree
  * @typedef {import('./contracts.js').ReviewNode} ReviewNode
- * @typedef {import('./contracts.js').FlowCursor} FlowCursor
  */
+
+/**
+ * Detects if a question path requires a repeater scope frame.
+ * @param {string} path
+ * @returns {string | null} Returns scope variable name or null
+ */
+function extractScopeToken(path) {
+  if (!path || typeof path !== "string") return null;
+  const tokens = tokenizePath(path);
+  const scopeToken = tokens.find((t) => t.type === "scope");
+  return scopeToken ? String(scopeToken.value) : null;
+}
+
+/**
+ * Formats a stable, hierarchical composite instance ID for a scoped question.
+ * Encodes full ScopeStack lineage (e.g. 'director_din@company:comp_1/director:dir_2').
+ * @param {string} questionId
+ * @param {ScopeStack} [scopeStack]
+ * @returns {string}
+ */
+export function formatScopeInstanceId(questionId, scopeStack) {
+  if (!scopeStack || scopeStack.isEmpty()) return questionId;
+  const frames = scopeStack.toArray();
+  const scopeKey = frames.map((f) => `${f.name}:${f.id}`).join("/");
+  return `${questionId}@${scopeKey}`;
+}
 
 /**
  * Checks if a question has been validly answered, with type-aware semantics.
@@ -73,24 +99,91 @@ export function isQuestionEligible(question, facts, scopeStack) {
 }
 
 /**
- * Flattens all eligible questions from the schema, resolving repeaters if applicable.
+ * Materializes all eligible question instances in natural document order (item-by-item for repeaters).
  * @param {IntakeSchema} schema
  * @param {Record<string, unknown>} facts
  * @param {ScopeStack} [rootScopeStack]
- * @returns {Array<{ question: QuestionDefinition, sectionId: string, sectionTitle: string, scopeStack: ScopeStack }>}
+ * @returns {Array<{ instanceId: string, question: QuestionDefinition, sectionId: string, sectionTitle: string, scopeStack: ScopeStack, path: string }>}
  */
 export function getEligibleQuestions(schema, facts, rootScopeStack = new ScopeStack()) {
   const result = [];
 
-  for (const section of schema.sections) {
-    for (const question of section.questions) {
-      if (isQuestionEligible(question, facts, rootScopeStack)) {
-        result.push({
-          question,
-          sectionId: section.id,
-          sectionTitle: section.title,
-          scopeStack: rootScopeStack,
-        });
+  for (const section of schema.sections || []) {
+    const questions = section.questions || [];
+    let qIdx = 0;
+
+    while (qIdx < questions.length) {
+      const q = questions[qIdx];
+      const scopeToken = q.scope || extractScopeToken(q.path);
+      const repeater = scopeToken
+        ? schema.repeaters?.find(
+            (r) => r.scopeName === scopeToken || r.id === scopeToken || scopeToken === "current"
+          )
+        : null;
+
+      if (repeater && (!rootScopeStack || !rootScopeStack.get(repeater.scopeName))) {
+        // Collect all consecutive questions belonging to this same repeater
+        const repeaterGroup = [q];
+        let nextIdx = qIdx + 1;
+        while (nextIdx < questions.length) {
+          const nextQ = questions[nextIdx];
+          const nextScope = nextQ.scope || extractScopeToken(nextQ.path);
+          if (nextScope === scopeToken) {
+            repeaterGroup.push(nextQ);
+            nextIdx++;
+          } else {
+            break;
+          }
+        }
+
+        const items = getAt(facts, repeater.collectionPath, rootScopeStack);
+        if (Array.isArray(items) && items.length > 0) {
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const itemId =
+              item?.id != null && item?.id !== ""
+                ? String(item.id)
+                : item?._id != null && item?._id !== ""
+                ? String(item._id)
+                : `${repeater.scopeName}_${i}`;
+
+            const itemScope = rootScopeStack.push({
+              name: repeater.scopeName,
+              index: i,
+              id: itemId,
+            });
+
+            for (const rq of repeaterGroup) {
+              if (isQuestionEligible(rq, facts, itemScope)) {
+                const resolved = resolvePath(rq.path, itemScope);
+                result.push({
+                  instanceId: formatScopeInstanceId(rq.id, itemScope),
+                  question: rq,
+                  sectionId: section.id,
+                  sectionTitle: section.title,
+                  scopeStack: itemScope,
+                  path: resolved,
+                });
+              }
+            }
+          }
+        }
+
+        qIdx = nextIdx;
+      } else {
+        // Standard non-repeater or already scoped question
+        if (isQuestionEligible(q, facts, rootScopeStack)) {
+          const resolved = resolvePath(q.path, rootScopeStack);
+          result.push({
+            instanceId: formatScopeInstanceId(q.id, rootScopeStack),
+            question: q,
+            sectionId: section.id,
+            sectionTitle: section.title,
+            scopeStack: rootScopeStack,
+            path: resolved,
+          });
+        }
+        qIdx++;
       }
     }
   }
@@ -119,10 +212,9 @@ export function resolveActiveQuestion(schema, facts, scopeStack = new ScopeStack
   const currentScope = currentItem.scopeStack;
 
   const total = eligible.length;
-  const currentIdx = eligible.findIndex((item) => item.question.id === q.id) + 1;
+  const currentIdx = eligible.findIndex((item) => item.instanceId === currentItem.instanceId) + 1;
 
-  const resolvedPath = resolvePath(q.path, currentScope);
-  const value = getAt(facts, resolvedPath);
+  const value = getAt(facts, currentItem.path);
 
   // Check if required
   let isRequired = true;
@@ -131,11 +223,11 @@ export function resolveActiveQuestion(schema, facts, scopeStack = new ScopeStack
   }
 
   return {
-    id: q.id,
+    id: currentItem.instanceId,
     questionId: q.id,
     sectionId: currentItem.sectionId,
     sectionTitle: currentItem.sectionTitle,
-    path: resolvedPath,
+    path: currentItem.path,
     kind: q.kind,
     label: q.label,
     description: q.description,
@@ -145,62 +237,99 @@ export function resolveActiveQuestion(schema, facts, scopeStack = new ScopeStack
     required: isRequired,
     isAnswered: false,
     progress: {
-      current: currentIdx,
-      total,
+      current: currentIdx > 0 ? currentIdx : 1,
+      total: total || 1,
     },
     scope: currentScope.toArray(),
+    question: q,
   };
 }
 
 /**
- * Builds a specific question projection by ID. Useful for one-click edit jumps.
+ * Builds a specific question projection by ID or composite instance ID. Useful for one-click edit jumps.
  * @param {IntakeSchema} schema
  * @param {Record<string, unknown>} facts
- * @param {string} questionId
+ * @param {string} targetId - Either base question ID (e.g. 'prop_category') or composite ID (e.g. 'seller_name@party:seller_123')
  * @param {ScopeStack} [scopeStack]
  * @returns {QuestionProjection | null}
  */
-export function buildQuestionProjectionById(schema, facts, questionId, scopeStack = new ScopeStack()) {
-  for (const section of schema.sections) {
-    const q = section.questions.find((item) => item.id === questionId);
-    if (q) {
-      const resolvedPath = resolvePath(q.path, scopeStack);
-      const value = getAt(facts, resolvedPath);
-      const eligible = getEligibleQuestions(schema, facts, scopeStack);
-      const currentIdx = eligible.findIndex((item) => item.question.id === q.id) + 1;
+export function buildQuestionProjectionById(schema, facts, targetId, scopeStack = new ScopeStack()) {
+  const atIdx = targetId.indexOf("@");
+  const baseQId = atIdx !== -1 ? targetId.slice(0, atIdx) : targetId;
+  const scopeKey = atIdx !== -1 ? targetId.slice(atIdx + 1) : null;
 
-      let isRequired = true;
-      if (q.requiredWhen) {
-        isRequired = evaluatePredicate(q.requiredWhen, { facts, scope: scopeStack });
+  for (const section of schema.sections || []) {
+    const q = section.questions?.find((item) => item.id === baseQId);
+    if (!q) continue;
+
+    let targetScope = scopeStack;
+    if (scopeKey) {
+      const segments = scopeKey.split("/");
+      for (const seg of segments) {
+        const [scopeName, frameId] = seg.includes(":")
+          ? seg.split(":")
+          : [q.scope || extractScopeToken(q.path) || "item", seg];
+
+        const repeater = schema.repeaters?.find(
+          (r) => r.scopeName === scopeName || r.id === scopeName || scopeName === "current"
+        );
+        if (repeater) {
+          const items = getAt(facts, repeater.collectionPath, targetScope);
+          if (Array.isArray(items)) {
+            const idx = items.findIndex(
+              (i) => i && (String(i.id) === frameId || String(i._id) === frameId)
+            );
+            if (idx !== -1) {
+              targetScope = targetScope.push({
+                name: repeater.scopeName,
+                index: idx,
+                id: frameId,
+              });
+            }
+          }
+        }
       }
-
-      return {
-        id: q.id,
-        questionId: q.id,
-        sectionId: section.id,
-        sectionTitle: section.title,
-        path: resolvedPath,
-        kind: q.kind,
-        label: q.label,
-        description: q.description,
-        value: value ?? null,
-        currentValue: value ?? null,
-        options: q.options ? [...q.options] : undefined,
-        required: isRequired,
-        isAnswered: isQuestionAnswered(q, facts, scopeStack),
-        progress: {
-          current: currentIdx > 0 ? currentIdx : 1,
-          total: eligible.length || 1,
-        },
-        scope: scopeStack.toArray(),
-      };
     }
+
+    const resolvedPath = resolvePath(q.path, targetScope);
+    const value = getAt(facts, resolvedPath);
+    const eligible = getEligibleQuestions(schema, facts, targetScope);
+    const currentIdx = eligible.findIndex(
+      (item) => item.question.id === q.id || item.instanceId === targetId
+    ) + 1;
+
+    let isRequired = true;
+    if (q.requiredWhen) {
+      isRequired = evaluatePredicate(q.requiredWhen, { facts, scope: targetScope });
+    }
+
+    return {
+      id: targetId,
+      questionId: q.id,
+      sectionId: section.id,
+      sectionTitle: section.title,
+      path: resolvedPath,
+      kind: q.kind,
+      label: q.label,
+      description: q.description,
+      value: value ?? null,
+      currentValue: value ?? null,
+      options: q.options ? [...q.options] : undefined,
+      required: isRequired,
+      isAnswered: isQuestionAnswered(q, facts, targetScope),
+      progress: {
+        current: currentIdx > 0 ? currentIdx : 1,
+        total: eligible.length || 1,
+      },
+      scope: targetScope.toArray(),
+      question: q,
+    };
   }
   return null;
 }
 
 /**
- * Builds the Master Review Tree from schema and canonical facts.
+ * Builds the Master Review Tree from schema and canonical facts, supporting nested repeater items.
  * @param {IntakeSchema} schema
  * @param {Record<string, unknown>} facts
  * @param {ScopeStack} [rootScopeStack]
@@ -213,55 +342,154 @@ export function buildReviewTree(schema, facts, rootScopeStack = new ScopeStack()
 
   const sectionNodes = [];
 
-  for (const section of schema.sections) {
+  for (const section of schema.sections || []) {
     const questionNodes = [];
+    const questions = section.questions || [];
+    let qIdx = 0;
 
-    for (const q of section.questions) {
-      const isEligible = isQuestionEligible(q, facts, rootScopeStack);
+    while (qIdx < questions.length) {
+      const q = questions[qIdx];
+      const scopeToken = q.scope || extractScopeToken(q.path);
+      const repeater = scopeToken
+        ? schema.repeaters?.find(
+            (r) => r.scopeName === scopeToken || r.id === scopeToken || scopeToken === "current"
+          )
+        : null;
 
-      if (!isEligible) {
+      if (repeater && (!rootScopeStack || !rootScopeStack.get(repeater.scopeName))) {
+        const repeaterGroup = [q];
+        let nextIdx = qIdx + 1;
+        while (nextIdx < questions.length) {
+          const nextQ = questions[nextIdx];
+          const nextScope = nextQ.scope || extractScopeToken(nextQ.path);
+          if (nextScope === scopeToken) {
+            repeaterGroup.push(nextQ);
+            nextIdx++;
+          } else {
+            break;
+          }
+        }
+
+        const items = getAt(facts, repeater.collectionPath, rootScopeStack);
+        if (Array.isArray(items) && items.length > 0) {
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const itemId =
+              item?.id != null && item?.id !== ""
+                ? String(item.id)
+                : item?._id != null && item?._id !== ""
+                ? String(item._id)
+                : `${repeater.scopeName}_${i}`;
+
+            const itemScope = rootScopeStack.push({
+              name: repeater.scopeName,
+              index: i,
+              id: itemId,
+            });
+
+            for (const rq of repeaterGroup) {
+              const isEligible = isQuestionEligible(rq, facts, itemScope);
+              const nodeInstanceId = formatScopeInstanceId(rq.id, itemScope);
+
+              if (!isEligible) {
+                questionNodes.push({
+                  id: nodeInstanceId,
+                  questionId: rq.id,
+                  kind: "question",
+                  label: `${rq.label} (#${i + 1})`,
+                  path: rq.path,
+                  status: "not-applicable",
+                  answered: false,
+                  eligible: false,
+                  scope: itemScope.toArray(),
+                });
+                continue;
+              }
+
+              const resolvedPath = resolvePath(rq.path, itemScope);
+              const value = getAt(facts, resolvedPath);
+              const answered = isQuestionAnswered(rq, facts, itemScope);
+
+              let isRequired = true;
+              if (rq.requiredWhen) {
+                isRequired = evaluatePredicate(rq.requiredWhen, { facts, scope: itemScope });
+              }
+
+              totalCount++;
+              if (answered) {
+                completeCount++;
+              } else if (isRequired) {
+                blockerCount++;
+              }
+
+              questionNodes.push({
+                id: nodeInstanceId,
+                questionId: rq.id,
+                kind: "question",
+                label: `${rq.label} (#${i + 1})`,
+                path: resolvedPath,
+                value,
+                scope: itemScope.toArray(),
+                status: answered ? "complete" : "incomplete",
+                answered,
+                eligible: true,
+              });
+            }
+          }
+        }
+
+        qIdx = nextIdx;
+      } else {
+        // Non-repeater question
+        const isEligible = isQuestionEligible(q, facts, rootScopeStack);
+        const nodeInstanceId = formatScopeInstanceId(q.id, rootScopeStack);
+
+        if (!isEligible) {
+          questionNodes.push({
+            id: nodeInstanceId,
+            questionId: q.id,
+            kind: "question",
+            label: q.label,
+            path: q.path,
+            status: "not-applicable",
+            answered: false,
+            eligible: false,
+          });
+          qIdx++;
+          continue;
+        }
+
+        const resolvedPath = resolvePath(q.path, rootScopeStack);
+        const value = getAt(facts, resolvedPath);
+        const answered = isQuestionAnswered(q, facts, rootScopeStack);
+
+        let isRequired = true;
+        if (q.requiredWhen) {
+          isRequired = evaluatePredicate(q.requiredWhen, { facts, scope: rootScopeStack });
+        }
+
+        totalCount++;
+
+        if (answered) {
+          completeCount++;
+        } else if (isRequired) {
+          blockerCount++;
+        }
+
         questionNodes.push({
-          id: q.id,
+          id: nodeInstanceId,
           questionId: q.id,
           kind: "question",
           label: q.label,
-          path: q.path,
-          status: "not-applicable",
-          answered: false,
-          eligible: false,
+          path: resolvedPath,
+          value,
+          scope: rootScopeStack.toArray(),
+          status: answered ? "complete" : "incomplete",
+          answered,
+          eligible: true,
         });
-        continue;
+        qIdx++;
       }
-
-      const resolvedPath = resolvePath(q.path, rootScopeStack);
-      const value = getAt(facts, resolvedPath);
-      const answered = isQuestionAnswered(q, facts, rootScopeStack);
-
-      let isRequired = true;
-      if (q.requiredWhen) {
-        isRequired = evaluatePredicate(q.requiredWhen, { facts, scope: rootScopeStack });
-      }
-
-      totalCount++;
-
-      if (answered) {
-        completeCount++;
-      } else if (isRequired) {
-        blockerCount++;
-      }
-
-      questionNodes.push({
-        id: q.id,
-        questionId: q.id,
-        kind: "question",
-        label: q.label,
-        path: resolvedPath,
-        value,
-        scope: rootScopeStack.toArray(),
-        status: answered ? "complete" : "incomplete",
-        answered,
-        eligible: true,
-      });
     }
 
     sectionNodes.push({

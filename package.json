@@ -1,6 +1,6 @@
 {
   "name": "theta-engine",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Deterministic schema-driven intake runtime and progressive question engine",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,6 +13,14 @@
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "default": "./dist/schema.js"
+    },
+    "./dag": {
+      "types": "./dist/dag.d.ts",
+      "default": "./dist/dag.js"
     },
     "./storage": {
       "types": "./dist/storage.d.ts",
@@ -51,7 +59,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/INVARIANTS.md"
   ],
   "scripts": {
     "build": "npm run clean && npm run build:types && npm run build:js",
@@ -72,7 +81,8 @@
     "progressive-disclosure",
     "state-machine",
     "legal-tech",
-    "zero-dependency"
+    "zero-dependency",
+    "dependency-dag"
   ],
   "author": "Anmol Maniyar",
   "license": "MIT",

@@ -245,4 +245,151 @@ describe("Theta Engine End-to-End Runtime", () => {
     assert.equal(engine2.getState().facts.property.category, "plot");
     assert.equal(engine2.getRevision(), engine1.getRevision());
   });
+
+  test("COMMIT_ANSWER executes question validation contract and rejects invalid input", () => {
+    const validatingSchema = {
+      id: "pan_validation_schema",
+      version: 1,
+      sections: [
+        {
+          id: "kyc",
+          title: "KYC Details",
+          questions: [
+            {
+              id: "pan_number",
+              sectionId: "kyc",
+              path: "seller.pan",
+              kind: "pan",
+              label: "Enter 10-digit Permanent Account Number (PAN)",
+              validate: (val) => {
+                if (typeof val !== "string" || !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(val)) {
+                  return "Invalid Indian PAN format (expected ABCDE1234F)";
+                }
+                return true;
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const engine = createThetaEngine({ schema: validatingSchema });
+    const initialRev = engine.getRevision();
+
+    // 1. Submit invalid PAN
+    const failRes = engine.dispatch({
+      type: "COMMIT_ANSWER",
+      questionId: "pan_number",
+      value: "123INVALID",
+    });
+
+    assert.equal(failRes.ok, false);
+    assert.equal(failRes.error, "Invalid Indian PAN format (expected ABCDE1234F)");
+    assert.equal(engine.getState().facts.seller?.pan, undefined);
+    assert.equal(engine.getRevision(), initialRev); // Revision must NOT increment on validation failure!
+
+    // 2. Submit valid PAN
+    const passRes = engine.dispatch({
+      type: "COMMIT_ANSWER",
+      questionId: "pan_number",
+      value: "ABCDE1234F",
+    });
+
+    assert.equal(passRes.ok, true);
+    assert.equal(engine.getState().facts.seller.pan, "ABCDE1234F");
+    assert.equal(engine.getRevision(), initialRev + 1);
+  });
+
+  test("repeater collections expand into QuestionInstances in active question and review tree", () => {
+    const repeaterSchema = {
+      id: "parties_schema",
+      version: 1,
+      sections: [
+        {
+          id: "parties_sec",
+          title: "Parties First Part",
+          questions: [
+            {
+              id: "party_name",
+              sectionId: "parties_sec",
+              path: "parties[$party].name",
+              kind: "text",
+              label: "Party Full Legal Name",
+            },
+            {
+              id: "party_pan",
+              sectionId: "parties_sec",
+              path: "parties[$party].pan",
+              kind: "pan",
+              label: "Party PAN",
+            },
+          ],
+        },
+      ],
+      repeaters: [
+        {
+          id: "party_repeater",
+          collectionPath: "parties",
+          scopeName: "party",
+          itemLabel: "Party",
+        },
+      ],
+    };
+
+    const engine = createThetaEngine({
+      schema: repeaterSchema,
+      initialFacts: {
+        parties: [
+          { id: "p1", name: "Suresh Sharma" },
+          { id: "p2" }, // Missing name and pan
+        ],
+      },
+    });
+
+    // Q1 for Party 1 (name is answered, so active should be party_pan for Party 1)
+    const active1 = engine.getActiveQuestion();
+    assert.equal(active1.questionId, "party_pan");
+    assert.equal(active1.id, "party_pan@party:p1");
+    assert.equal(active1.path, "parties[0].pan");
+
+    // Commit Party 1 PAN
+    engine.dispatch({
+      type: "COMMIT_ANSWER",
+      questionId: "party_pan@party:p1",
+      path: "parties[0].pan",
+      value: "AAAPS1234K",
+    });
+
+    // Next active question must be Party 2 Name!
+    const active2 = engine.getActiveQuestion();
+    assert.equal(active2.questionId, "party_name");
+    assert.equal(active2.id, "party_name@party:p2");
+    assert.equal(active2.path, "parties[1].name");
+
+    // Verify Review Tree contains both items
+    const tree = engine.getReviewTree();
+    assert.equal(tree.stats.total, 4); // 2 questions * 2 parties
+    assert.equal(tree.stats.complete, 2); // p1.name, p1.pan
+    assert.equal(tree.stats.blockers, 2); // p2.name, p2.pan
+  });
+
+  test("persistence queue serializes rapid async persistence writes in order", async () => {
+    const storage = new MemoryStorageAdapter();
+    const engine = createThetaEngine({ schema: conveyanceSchema, storage });
+
+    // Rapid dispatches
+    for (let i = 1; i <= 5; i++) {
+      engine.dispatch({
+        type: "SET_FACT",
+        path: "property.category",
+        value: `category_${i}`,
+      });
+    }
+
+    await engine.flush();
+
+    const loaded = await storage.load();
+    assert.equal(loaded.facts.property.category, "category_5");
+    assert.equal(loaded.revision, 6);
+  });
 });

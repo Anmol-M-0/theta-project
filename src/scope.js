@@ -11,6 +11,22 @@ import { getAt, setAt, deleteAt } from "./path.js";
  */
 
 /**
+ * Generates a unique, URL-safe random identifier.
+ * Zero-dependency, portable across Node.js, Bun, Deno, and modern browsers.
+ * @param {string} [prefix]
+ * @returns {string}
+ */
+export function generateId(prefix = "") {
+  let rand = "";
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    rand = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+  } else {
+    rand = Math.random().toString(36).substring(2, 10);
+  }
+  return prefix ? `${prefix}_${rand}` : rand;
+}
+
+/**
  * Immutable Stack representing active nested scopes (e.g. party -> director).
  */
 export class ScopeStack {
@@ -24,6 +40,7 @@ export class ScopeStack {
 
   /**
    * Pushes a new frame and returns a new ScopeStack instance.
+   * Preserves falsy IDs (e.g. 0) while ensuring every frame has a defined ID.
    * @param {ScopeFrame} frame
    * @returns {ScopeStack}
    */
@@ -31,7 +48,17 @@ export class ScopeStack {
     if (!frame || typeof frame.name !== "string" || typeof frame.index !== "number") {
       throw new Error(`Invalid ScopeFrame: ${JSON.stringify(frame)}`);
     }
-    return new ScopeStack([...this.frames, frame]);
+    const frameId =
+      frame.id != null && frame.id !== ""
+        ? String(frame.id)
+        : `${frame.name}_${frame.index}`;
+
+    const frameWithId = {
+      name: frame.name,
+      index: frame.index,
+      id: frameId,
+    };
+    return new ScopeStack([...this.frames, frameWithId]);
   }
 
   /**
@@ -93,6 +120,7 @@ export class ScopeStack {
 
 /**
  * Appends a new item to a repeater collection immutably.
+ * Stamping a stable unique identifier if missing (Invariant 3: id = identity, index = position).
  * @param {Record<string, unknown>} facts
  * @param {RepeaterDefinition} repeater
  * @param {Record<string, unknown>} [item]
@@ -107,7 +135,19 @@ export function addRepeaterItem(facts, repeater, item, scopeStack) {
     throw new Error(`Repeater '${repeater.id}' reached maximum capacity of ${repeater.maxItems} items`);
   }
 
-  const newItem = item ?? (repeater.createItem ? repeater.createItem() : {});
+  const rawItem = item ?? (repeater.createItem ? repeater.createItem() : {});
+  const itemId =
+    rawItem.id != null && rawItem.id !== ""
+      ? rawItem.id
+      : rawItem._id != null && rawItem._id !== ""
+      ? rawItem._id
+      : generateId(repeater.scopeName || "item");
+
+  const newItem = {
+    ...rawItem,
+    id: itemId,
+  };
+
   arr.push(newItem);
 
   return setAt(facts, repeater.collectionPath, arr, scopeStack);
@@ -115,6 +155,7 @@ export function addRepeaterItem(facts, repeater, item, scopeStack) {
 
 /**
  * Removes an item from a repeater collection immutably.
+ * Preserves the immutable item IDs of all surviving items.
  * @param {Record<string, unknown>} facts
  * @param {RepeaterDefinition} repeater
  * @param {number} index
