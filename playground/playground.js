@@ -1,11 +1,31 @@
-import { createThetaEngine, MemoryStorageAdapter } from "./theta.js";
-import { conveyanceDeedSchema, notice138Schema, minimalBranchingSchema } from "./schemas.js";
+/**
+ * @file playground.js
+ * @description Theta Engine v0.5 Interactive Studio & Reactive Workbench.
+ */
 
-// Global Playground State
+import {
+  createThetaEngine,
+  MemoryStorageAdapter,
+  createStoreAdapter,
+  createCommandHistory,
+  generateTypeScript,
+  canonicalize
+} from "./theta.js";
+
+import {
+  conveyanceDeedSchema,
+  notice138Schema,
+  minimalBranchingSchema
+} from "./schemas.js";
+
+// Global Workbench State
 let engine = null;
+let adapter = null;
+let history = null;
 let currentSchema = conveyanceDeedSchema;
 let transactionHistory = [];
 let invalidationMessage = null;
+let showingTsTypes = false;
 
 const schemasMap = {
   conveyance: conveyanceDeedSchema,
@@ -14,21 +34,45 @@ const schemasMap = {
 };
 
 /**
- * Initializes Theta Engine instance with selected schema
+ * Initializes Theta Engine instance with selected schema and framework adapter.
  */
 function initEngine(schema) {
+  if (adapter) {
+    try { adapter.destroy(); } catch (_) {}
+  }
+
   currentSchema = schema;
   transactionHistory = [];
   invalidationMessage = null;
-  
+  showingTsTypes = false;
+
   engine = createThetaEngine({
     schema: currentSchema,
     storage: new MemoryStorageAdapter()
   });
 
-  // Track state changes reactively
-  engine.subscribe((state) => {
+  // Wrap with v0.5 Universal Store Adapter
+  adapter = createStoreAdapter(engine);
+
+  // Initialize v0.5 Time-Travel Command History
+  history = createCommandHistory(engine);
+
+  // Subscribe reactively through StoreAdapter
+  adapter.subscribe(() => {
     updateUI();
+  });
+
+  // Track invalidated events
+  engine.subscribe((state, event) => {
+    if (event?.invalidatedPaths && event.invalidatedPaths.length > 0) {
+      invalidationMessage = `Atomic Branch Invalidation: Purged stale paths [${event.invalidatedPaths.join(", ")}] in single tick`;
+      transactionHistory.unshift({
+        time: new Date().toLocaleTimeString(),
+        type: "BRANCH_PURGED",
+        path: event.invalidatedPaths.join(", "),
+        isInvalidation: true
+      });
+    }
   });
 
   updateUI();
@@ -41,6 +85,20 @@ function updateUI() {
   renderQuestionPanel();
   renderFactsPanel();
   renderReviewPanel();
+  updateUndoRedoButtons();
+}
+
+function updateUndoRedoButtons() {
+  const btnUndo = document.getElementById("btnUndo");
+  const btnRedo = document.getElementById("btnRedo");
+  if (btnUndo && history) {
+    btnUndo.disabled = !history.canUndo();
+    btnUndo.style.opacity = history.canUndo() ? "1" : "0.45";
+  }
+  if (btnRedo && history) {
+    btnRedo.disabled = !history.canRedo();
+    btnRedo.style.opacity = history.canRedo() ? "1" : "0.45";
+  }
 }
 
 /**
@@ -48,6 +106,8 @@ function updateUI() {
  */
 function renderQuestionPanel() {
   const container = document.getElementById("intakePanelBody");
+  if (!container || !engine) return;
+
   const activeQ = engine.getActiveQuestion();
   const reviewTree = engine.getReviewTree();
   const stats = reviewTree.stats || {};
@@ -57,7 +117,6 @@ function renderQuestionPanel() {
 
   // Progress Bar
   const progressPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
-  
   const progressFill = document.getElementById("progressFill");
   const progressMetrics = document.getElementById("progressMetrics");
   if (progressFill && progressMetrics) {
@@ -115,9 +174,13 @@ function renderQuestionPanel() {
         }).join('')}
       </div>
     `;
-  } else if (activeQ.kind === "number") {
+  } else if (activeQ.kind === "number" || activeQ.kind === "currency") {
     inputHtml = `
-      <input type="number" id="activeInput" class="input-control" placeholder="Enter numeric value..." value="${currentVal !== undefined && currentVal !== null ? currentVal : ''}" autofocus />
+      <input type="number" id="activeInput" class="input-control" placeholder="Enter numeric amount..." value="${currentVal !== undefined && currentVal !== null ? currentVal : ''}" autofocus />
+    `;
+  } else if (activeQ.kind === "date") {
+    inputHtml = `
+      <input type="date" id="activeInput" class="input-control" value="${currentVal || ''}" autofocus />
     `;
   } else {
     inputHtml = `
@@ -149,10 +212,8 @@ function renderQuestionPanel() {
   container.querySelectorAll(".option-card").forEach(card => {
     card.addEventListener("click", () => {
       const val = card.getAttribute("data-value");
-      // Visually select first
       container.querySelectorAll(".option-card").forEach(c => c.classList.remove("selected"));
       card.classList.add("selected");
-      // Commit answer
       commitAnswer(activeQ, val);
     });
   });
@@ -164,14 +225,15 @@ function renderQuestionPanel() {
       if (selected) {
         commitAnswer(activeQ, selected.getAttribute("data-value"));
       } else if (activeQ.options && activeQ.options.length > 0) {
-        // Default to first option if none selected
         commitAnswer(activeQ, activeQ.options[0].value);
       }
     } else {
       const inputEl = document.getElementById("activeInput");
       if (inputEl) {
         let val = inputEl.value.trim();
-        if (activeQ.kind === "number" && val !== "") val = Number(val);
+        if ((activeQ.kind === "number" || activeQ.kind === "currency") && val !== "") {
+          val = Number(val);
+        }
         commitAnswer(activeQ, val);
       }
     }
@@ -210,12 +272,13 @@ function renderQuestionPanel() {
 }
 
 /**
- * Commits an answer and detects atomic invalidations
+ * Commits an answer through the engine transaction pipeline.
  */
 function commitAnswer(question, value) {
   const qId = question.questionId || question.id;
   const qPath = question.path;
-  const oldVal = question.currentValue ?? question.value;
+
+  invalidationMessage = null;
 
   try {
     engine.dispatch({
@@ -224,68 +287,51 @@ function commitAnswer(question, value) {
       path: qPath,
       value: value
     });
+
+    transactionHistory.unshift({
+      time: new Date().toLocaleTimeString(),
+      type: "COMMIT_ANSWER",
+      path: qPath,
+      val: JSON.stringify(value)
+    });
   } catch (err) {
     console.error("[Theta Engine Playground] Dispatch error:", err);
-    // Fallback to SET_FACT
-    engine.dispatch({
-      type: "SET_FACT",
-      path: qPath,
-      value: value
-    });
   }
-
-  // Log transaction
-  const logEntry = {
-    time: new Date().toLocaleTimeString(),
-    type: "COMMIT_ANSWER",
-    path: qPath,
-    val: JSON.stringify(value)
-  };
-  transactionHistory.unshift(logEntry);
-
-  // Check if branch invalidation occurred
-  if (oldVal !== undefined && oldVal !== null && oldVal !== value) {
-    const branch = currentSchema.branches?.find(b => b.discriminatorPath === qPath);
-    if (branch && branch.ownedPaths && branch.ownedPaths[oldVal]) {
-      const purgedPaths = branch.ownedPaths[oldVal];
-      invalidationMessage = `Atomic Invalidation: purged stale paths [${purgedPaths.join(', ')}] in 1 transaction tick`;
-      transactionHistory.unshift({
-        time: new Date().toLocaleTimeString(),
-        type: "BRANCH_PURGED",
-        path: purgedPaths.join(", "),
-        isInvalidation: true
-      });
-    } else {
-      invalidationMessage = null;
-    }
-  } else {
-    invalidationMessage = null;
-  }
-
-  updateUI();
 }
 
 /**
- * Renders Column 2: Canonical Facts JSON Inspector
+ * Renders Column 2: Canonical Facts JSON Inspector / TypeScript Generator
  */
 function renderFactsPanel() {
   const jsonViewer = document.getElementById("factsJsonViewer");
   const revBadge = document.getElementById("revBadge");
   const factsSizeBadge = document.getElementById("factsSizeBadge");
   const logFeed = document.getElementById("logFeed");
+  const factsPanelTitle = document.getElementById("factsPanelTitle");
+
+  if (!engine) return;
 
   const state = engine.getState();
-  const factsStr = JSON.stringify(state.facts, null, 2);
 
-  if (jsonViewer) jsonViewer.textContent = factsStr;
-  if (revBadge) revBadge.textContent = `Revision: ${state.revision}`;
-  if (factsSizeBadge) factsSizeBadge.textContent = `${new Blob([factsStr]).size} bytes`;
+  if (showingTsTypes) {
+    if (factsPanelTitle) factsPanelTitle.textContent = "2. Generated TypeScript Types";
+    const tsCode = generateTypeScript(currentSchema);
+    if (jsonViewer) jsonViewer.textContent = tsCode;
+    if (revBadge) revBadge.textContent = "Type: IntakeSchema";
+    if (factsSizeBadge) factsSizeBadge.textContent = `${new Blob([tsCode]).size} bytes`;
+  } else {
+    if (factsPanelTitle) factsPanelTitle.textContent = "2. Canonical Facts JSON";
+    const factsStr = JSON.stringify(state.facts, null, 2);
+    if (jsonViewer) jsonViewer.textContent = factsStr;
+    if (revBadge) revBadge.textContent = `Revision: ${state.revision}`;
+    if (factsSizeBadge) factsSizeBadge.textContent = `${new Blob([factsStr]).size} bytes`;
+  }
 
   if (logFeed) {
     if (transactionHistory.length === 0) {
       logFeed.innerHTML = `<div class="log-item" style="color:var(--text-muted);">No transactions committed yet.</div>`;
     } else {
-      logFeed.innerHTML = transactionHistory.slice(0, 5).map(log => `
+      logFeed.innerHTML = transactionHistory.slice(0, 6).map(log => `
         <div class="log-item ${log.isInvalidation ? 'invalidation' : ''}">
           <span>${log.isInvalidation ? '⚡ ' : ''}${log.type} (${log.path})</span>
           <span>${log.time}</span>
@@ -300,6 +346,8 @@ function renderFactsPanel() {
  */
 function renderReviewPanel() {
   const container = document.getElementById("reviewTreeContainer");
+  if (!container || !engine) return;
+
   const reviewTree = engine.getReviewTree();
 
   container.innerHTML = (reviewTree.sections || []).map(section => {
@@ -335,7 +383,7 @@ function renderReviewPanel() {
                   <div class="review-val">${displayVal}</div>
                 </div>
                 ${isApplicable ? `
-                  <button class="btn-jump" data-id="${qTargetId}">Edit</button>
+                  <button class="btn-jump" data-id="${qTargetId}">Edit ↗</button>
                 ` : ''}
               </div>
             `;
@@ -362,7 +410,6 @@ function renderReviewPanel() {
 
 // Global Keyboard Shortcut Listener (1, 2, 3 for card options)
 window.addEventListener("keydown", (e) => {
-  // If typing in an input field, do not trigger numeric shortcuts
   if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
 
   const activeQ = engine?.getActiveQuestion();
@@ -372,12 +419,6 @@ window.addEventListener("keydown", (e) => {
   if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= activeQ.options.length) {
     const opt = activeQ.options[keyNum - 1];
     if (opt) {
-      // Visually highlight card
-      const card = document.querySelector(`.option-card[data-value="${opt.value}"]`);
-      if (card) {
-        document.querySelectorAll(".option-card").forEach(c => c.classList.remove("selected"));
-        card.classList.add("selected");
-      }
       commitAnswer(activeQ, opt.value);
     }
   }
@@ -395,30 +436,58 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Undo / Redo
+  document.getElementById("btnUndo")?.addEventListener("click", () => {
+    if (history?.canUndo()) {
+      history.undo();
+      updateUI();
+    }
+  });
+
+  document.getElementById("btnRedo")?.addEventListener("click", () => {
+    if (history?.canRedo()) {
+      history.redo();
+      updateUI();
+    }
+  });
+
+  // Toggle TS Types Viewer
+  document.getElementById("btnViewTs")?.addEventListener("click", () => {
+    showingTsTypes = !showingTsTypes;
+    const btn = document.getElementById("btnViewTs");
+    if (btn) {
+      btn.textContent = showingTsTypes ? "JSON Facts" : "TS Types";
+    }
+    renderFactsPanel();
+  });
+
   // Populate Demo Data Button
   document.getElementById("btnFillSample")?.addEventListener("click", () => {
     if (currentSchema.id === "indian_conveyance_deed") {
-      engine.dispatch({ type: "SET_FACT", path: "property.category", value: "apartment" });
-      engine.dispatch({ type: "SET_FACT", path: "property.apartment.floorNumber", value: 5 });
-      engine.dispatch({ type: "SET_FACT", path: "property.apartment.towerBlock", value: "Tower Cedar, Wing A" });
-      engine.dispatch({ type: "SET_FACT", path: "property.carpetAreaSqFt", value: 1250 });
-      engine.dispatch({ type: "SET_FACT", path: "parties.primarySeller.entityType", value: "individual" });
-      engine.dispatch({ type: "SET_FACT", path: "parties.primarySeller.individual.fullName", value: "Rajesh Kumar Sharma" });
-      engine.dispatch({ type: "SET_FACT", path: "parties.primarySeller.individual.panNumber", value: "ABCPS1234F" });
-      engine.dispatch({ type: "SET_FACT", path: "consideration.totalAmountInr", value: 8500000 });
-      engine.dispatch({ type: "SET_FACT", path: "consideration.primaryPaymentMode", value: "rtgs" });
-      engine.dispatch({ type: "SET_FACT", path: "consideration.tokenAdvancePaid", value: 1000000 });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "property_type", path: "property.category", value: "apartment" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "apt_floor", path: "property.apartment.floorNumber", value: 5 });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "apt_tower", path: "property.apartment.towerBlock", value: "Tower Cedar, Wing A" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "carpet_area", path: "property.carpetAreaSqFt", value: 1250 });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "seller_type", path: "parties.primarySeller.entityType", value: "company" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "seller_co_name", path: "parties.primarySeller.company.corporateName", value: "Apex Realcon Infra Private Limited" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "seller_co_cin", path: "parties.primarySeller.company.cin", value: "U45200MH2021PTC123456" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "seller_co_director", path: "parties.primarySeller.company.authorizedDirector", value: "Vikram Malhotra" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "total_price", path: "consideration.totalAmountInr", value: 8500000 });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "payment_mode", path: "consideration.primaryPaymentMode", value: "rtgs" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "advance_paid", path: "consideration.tokenAdvancePaid", value: 1000000 });
       engine.dispatch({ type: "CLEAR_CURSOR" });
     } else if (currentSchema.id === "section_138_notice") {
-      engine.dispatch({ type: "SET_FACT", path: "cheque.instrumentNumber", value: "084912" });
-      engine.dispatch({ type: "SET_FACT", path: "cheque.amountInr", value: 450000 });
-      engine.dispatch({ type: "SET_FACT", path: "cheque.draweeBank", value: "State Bank of India, MG Road" });
-      engine.dispatch({ type: "SET_FACT", path: "dishonour.returnReason", value: "funds_insufficient" });
-      engine.dispatch({ type: "SET_FACT", path: "dishonour.memoDate", value: "14/08/2026" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "cheque_number", path: "cheque.instrumentNumber", value: "084912" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "cheque_amount", path: "cheque.amountInr", value: 450000 });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "cheque_bank", path: "cheque.draweeBank", value: "State Bank of India, MG Road" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "memo_reason", path: "dishonour.returnReason", value: "funds_insufficient" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "memo_date", path: "dishonour.memoDate", value: "2026-08-14" });
       engine.dispatch({ type: "CLEAR_CURSOR" });
     } else {
-      engine.dispatch({ type: "SET_FACT", path: "profile.type", value: "developer" });
-      engine.dispatch({ type: "SET_FACT", path: "profile.developer.githubUsername", value: "anmol-m-0" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "user_type", path: "profile.type", value: "developer" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "github_username", path: "profile.developer.githubUsername", value: "anmol-m-0" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "dev_tier", path: "profile.developer.tier", value: "sponsor" });
+      engine.dispatch({ type: "COMMIT_ANSWER", questionId: "dev_sponsor_amount", path: "profile.developer.sponsorAmount", value: 250 });
       engine.dispatch({ type: "CLEAR_CURSOR" });
     }
     updateUI();

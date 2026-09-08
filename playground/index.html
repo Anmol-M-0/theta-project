@@ -22,7 +22,7 @@
       <div>
         <h1 class="brand-title">Theta Engine</h1>
       </div>
-      <span class="badge-pill">v0.1.0 • Pure ESM</span>
+      <span class="badge-pill">v0.5.0 • Pure ESM</span>
     </div>
 
     <div class="header-controls">
@@ -30,11 +30,14 @@
       <select id="schemaSelect" class="select-control">
         <option value="conveyance">Indian Conveyance Deed (Complex Legal Drafting)</option>
         <option value="notice138">Section 138 NI Act Notice (Statutory Banking Demand)</option>
-        <option value="branching">Atomic Branch Invalidation Demo</option>
+        <option value="branching">Multi-Level Cascading Branch Invalidation Demo</option>
       </select>
 
+      <button id="btnUndo" class="btn-header" title="Undo Last Mutation">↶ Undo</button>
+      <button id="btnRedo" class="btn-header" title="Redo Last Mutation">↷ Redo</button>
       <button id="btnFillSample" class="btn-header">⚡ Fill Demo Data</button>
       <button id="btnResetState" class="btn-header">↺ Reset</button>
+      <button id="btnViewTs" class="btn-header">TS Types</button>
       <button id="btnCopyJson" class="btn-header primary">⎘ Copy Facts</button>
       <a href="https://github.com/Anmol-M-0/theta-project" target="_blank" rel="noopener" class="btn-header">
         GitHub ↗
@@ -79,7 +82,7 @@
       <div class="panel-header">
         <div class="panel-title">
           <span class="dot" style="background: var(--cyan-400); box-shadow: 0 0 8px var(--cyan-400);"></span>
-          <span>2. Canonical Facts JSON</span>
+          <span id="factsPanelTitle">2. Canonical Facts JSON</span>
         </div>
         <div class="facts-meta" style="margin-top:0;">
           <span id="revBadge">Revision: 0</span>

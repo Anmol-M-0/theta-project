@@ -1,67 +1,72 @@
 /**
- * Theta Playground Preset Schemas
+ * @file schemas.js
+ * @description Standardized legal tech & conditional branching schemas for Theta Engine Studio.
  */
 
 export const conveyanceDeedSchema = {
   id: "indian_conveyance_deed",
   version: 1,
-  title: "Agreement to Sell / Conveyance Deed",
+  title: "Indian Conveyance Deed (Complex Legal Drafting)",
   sections: [
     {
       id: "property_sec",
-      title: "Property Classification",
+      title: "Property Identification",
       questions: [
         {
-          id: "prop_category",
+          id: "property_type",
           sectionId: "property_sec",
           path: "property.category",
           kind: "card",
-          label: "What is the physical nature of the property?",
-          description: "Select the legal classification under local revenue laws.",
+          label: "Select the real estate category:",
+          description: "Branching determines statutory schedule clauses and municipal clearances",
           options: [
-            { value: "apartment", label: "Residential Apartment", hint: "Flats, duplexes, multi-unit buildings" },
-            { value: "plot", label: "Vacant Plotted Land", hint: "Survey layout plots, freehold land" },
-            { value: "commercial", label: "Commercial Unit", hint: "Retail shops, office spaces, warehouses" }
+            { value: "apartment", label: "Residential Apartment / Flat", hint: "Includes undivided share in land (UDS) and society membership" },
+            { value: "plot", label: "Freehold Land / Plot", hint: "Includes revenue survey demarcation and boundary schedule" },
+            { value: "commercial", label: "Commercial Office / Retail Unit", hint: "Includes GST consideration schedule and building maintenance terms" }
           ],
           validation: { required: true }
         },
         {
           id: "apt_floor",
           sectionId: "property_sec",
+          branch: "b_apartment",
           path: "property.apartment.floorNumber",
           kind: "number",
-          label: "On which floor is the apartment situated?",
-          description: "e.g., 4 for 4th Floor, 0 for Ground Floor",
-          visibleWhen: { field: "property.category", operator: "equals", value: "apartment" },
+          label: "Floor Number of the Apartment:",
+          visibleWhen: { equals: { path: "property.category", value: "apartment" } },
           validation: { required: true }
         },
         {
           id: "apt_tower",
           sectionId: "property_sec",
+          branch: "b_apartment",
           path: "property.apartment.towerBlock",
           kind: "text",
-          label: "Tower, Wing or Block identification:",
+          label: "Tower / Block / Wing Designation:",
           description: "e.g., Tower B, Wing 3",
-          visibleWhen: { field: "property.category", operator: "equals", value: "apartment" }
+          visibleWhen: { equals: { path: "property.category", value: "apartment" } },
+          validation: { required: true }
         },
         {
           id: "plot_survey",
           sectionId: "property_sec",
+          branch: "b_plot",
           path: "property.plot.surveyNumber",
           kind: "text",
-          label: "Revenue Survey / Khasra Number:",
-          description: "Official survey or plot identification in revenue records",
-          visibleWhen: { field: "property.category", operator: "equals", value: "plot" },
+          label: "Revenue Survey / Khasra / CTS Number:",
+          description: "e.g., Survey No. 142/3A, Village Haveli",
+          visibleWhen: { equals: { path: "property.category", value: "plot" } },
           validation: { required: true }
         },
         {
-          id: "comm_shop_no",
+          id: "comm_complex",
           sectionId: "property_sec",
-          path: "property.commercial.unitNumber",
+          branch: "b_commercial",
+          path: "property.commercial.complexName",
           kind: "text",
-          label: "Commercial Unit / Shop Number:",
-          description: "Unit number as sanctioned in the master plan",
-          visibleWhen: { field: "property.category", operator: "equals", value: "commercial" },
+          label: "Commercial Complex / Tech Park Name:",
+          description: "e.g., Cyber Gateway Business Centre",
+          visibleWhen: { equals: { path: "property.category", value: "commercial" } },
           validation: { required: true }
         },
         {
@@ -69,76 +74,81 @@ export const conveyanceDeedSchema = {
           sectionId: "property_sec",
           path: "property.carpetAreaSqFt",
           kind: "number",
-          label: "Total Carpet Area (in sq. ft.):",
-          description: "RERA carpet area measurement",
+          label: "Total Carpet Area (in Sq. Ft.):",
+          description: "As defined under RERA Act 2016",
           validation: { required: true }
         }
       ]
     },
     {
       id: "parties_sec",
-      title: "Parties Identification",
+      title: "Seller Entity Details",
       questions: [
         {
-          id: "seller_entity_type",
+          id: "seller_type",
           sectionId: "parties_sec",
           path: "parties.primarySeller.entityType",
           kind: "card",
-          label: "What is the legal entity constitution of the Seller?",
-          description: "Changing this cleanly clears conditional company/individual facts.",
+          label: "What is the legal constitution of the Primary Seller?",
+          description: "Determines execution verification, PAN/CIN, and Board Resolution mandates",
           options: [
-            { value: "individual", label: "Individual / Natural Person", hint: "Natural citizen, proprietary" },
-            { value: "company", label: "Registered Corporate Body", hint: "Private Limited, Public Limited, LLP" }
+            { value: "individual", label: "Individual / Sole Proprietor", hint: "Natural person with individual PAN & Aadhaar verification" },
+            { value: "company", label: "Registered Corporate Body", hint: "Private Limited, Public Limited, LLP with CIN" }
           ],
           validation: { required: true }
         },
         {
           id: "seller_ind_name",
           sectionId: "parties_sec",
+          branch: "b_seller_ind",
           path: "parties.primarySeller.individual.fullName",
           kind: "text",
           label: "Full Legal Name of the Individual Seller:",
           description: "As per PAN card or Aadhaar records",
-          visibleWhen: { field: "parties.primarySeller.entityType", operator: "equals", value: "individual" },
+          visibleWhen: { equals: { path: "parties.primarySeller.entityType", value: "individual" } },
           validation: { required: true }
         },
         {
           id: "seller_ind_pan",
           sectionId: "parties_sec",
+          branch: "b_seller_ind",
           path: "parties.primarySeller.individual.panNumber",
-          kind: "text",
+          kind: "pan",
           label: "Seller's Permanent Account Number (PAN):",
           description: "10-character alphanumeric PAN",
-          visibleWhen: { field: "parties.primarySeller.entityType", operator: "equals", value: "individual" }
+          visibleWhen: { equals: { path: "parties.primarySeller.entityType", value: "individual" } }
         },
         {
           id: "seller_co_name",
           sectionId: "parties_sec",
+          branch: "b_seller_co",
           path: "parties.primarySeller.company.corporateName",
           kind: "text",
           label: "Registered Company Name:",
           description: "Exact name as registered with Ministry of Corporate Affairs (MCA)",
-          visibleWhen: { field: "parties.primarySeller.entityType", operator: "equals", value: "company" },
+          visibleWhen: { equals: { path: "parties.primarySeller.entityType", value: "company" } },
           validation: { required: true }
         },
         {
           id: "seller_co_cin",
           sectionId: "parties_sec",
+          branch: "b_seller_co",
           path: "parties.primarySeller.company.cin",
-          kind: "text",
+          kind: "cin",
           label: "Corporate Identification Number (CIN):",
           description: "21-character MCA registration string",
-          visibleWhen: { field: "parties.primarySeller.entityType", operator: "equals", value: "company" },
+          visibleWhen: { equals: { path: "parties.primarySeller.entityType", value: "company" } },
           validation: { required: true }
         },
         {
           id: "seller_co_director",
           sectionId: "parties_sec",
+          branch: "b_seller_co",
           path: "parties.primarySeller.company.authorizedDirector",
           kind: "text",
           label: "Name of the Authorized Signatory / Director:",
           description: "Authorized via Board Resolution",
-          visibleWhen: { field: "parties.primarySeller.entityType", operator: "equals", value: "company" }
+          visibleWhen: { equals: { path: "parties.primarySeller.entityType", value: "company" } }
         }
       ]
     },
@@ -150,7 +160,7 @@ export const conveyanceDeedSchema = {
           id: "total_price",
           sectionId: "financial_sec",
           path: "consideration.totalAmountInr",
-          kind: "number",
+          kind: "currency",
           label: "Total Agreed Sale Consideration (INR):",
           description: "Gross agreed consideration figure",
           validation: { required: true }
@@ -170,7 +180,7 @@ export const conveyanceDeedSchema = {
           id: "advance_paid",
           sectionId: "financial_sec",
           path: "consideration.tokenAdvancePaid",
-          kind: "number",
+          kind: "currency",
           label: "Token or Advance Amount Paid (INR):",
           description: "Amount transferred upon signing agreement"
         }
@@ -179,21 +189,29 @@ export const conveyanceDeedSchema = {
   ],
   branches: [
     {
-      id: "prop_category_branch",
-      discriminatorPath: "property.category",
-      ownedPaths: {
-        apartment: ["property.apartment"],
-        plot: ["property.plot"],
-        commercial: ["property.commercial"]
-      }
+      id: "b_apartment",
+      activation: { equals: { path: "property.category", value: "apartment" } },
+      ownedPaths: ["property.apartment.floorNumber", "property.apartment.towerBlock"]
     },
     {
-      id: "seller_entity_branch",
-      discriminatorPath: "parties.primarySeller.entityType",
-      ownedPaths: {
-        individual: ["parties.primarySeller.individual"],
-        company: ["parties.primarySeller.company"]
-      }
+      id: "b_plot",
+      activation: { equals: { path: "property.category", value: "plot" } },
+      ownedPaths: ["property.plot.surveyNumber"]
+    },
+    {
+      id: "b_commercial",
+      activation: { equals: { path: "property.category", value: "commercial" } },
+      ownedPaths: ["property.commercial.complexName"]
+    },
+    {
+      id: "b_seller_ind",
+      activation: { equals: { path: "parties.primarySeller.entityType", value: "individual" } },
+      ownedPaths: ["parties.primarySeller.individual.fullName", "parties.primarySeller.individual.panNumber"]
+    },
+    {
+      id: "b_seller_co",
+      activation: { equals: { path: "parties.primarySeller.entityType", value: "company" } },
+      ownedPaths: ["parties.primarySeller.company.corporateName", "parties.primarySeller.company.cin", "parties.primarySeller.company.authorizedDirector"]
     }
   ]
 };
@@ -220,7 +238,7 @@ export const notice138Schema = {
           id: "cheque_amount",
           sectionId: "cheque_sec",
           path: "cheque.amountInr",
-          kind: "number",
+          kind: "currency",
           label: "Cheque Face Value Amount (INR):",
           description: "Numeric face amount dishonoured",
           validation: { required: true }
@@ -256,9 +274,9 @@ export const notice138Schema = {
           id: "memo_date",
           sectionId: "dishonour_sec",
           path: "dishonour.memoDate",
-          kind: "text",
+          kind: "date",
           label: "Date of Bank Return Memo:",
-          description: "DD/MM/YYYY - Critical for 30-day statutory limitation",
+          description: "Critical for 30-day statutory limitation period",
           validation: { required: true }
         }
       ]
@@ -283,7 +301,7 @@ export const minimalBranchingSchema = {
           kind: "card",
           label: "Select your account profile type:",
           options: [
-            { value: "developer", label: "Open Source Developer", hint: "Individual contributor" },
+            { value: "developer", label: "Open Source Developer", hint: "Individual software engineer" },
             { value: "enterprise", label: "Enterprise Organization", hint: "Corporations and teams" }
           ],
           validation: { required: true }
@@ -291,19 +309,56 @@ export const minimalBranchingSchema = {
         {
           id: "github_username",
           sectionId: "demo_sec",
+          branch: "b_dev",
           path: "profile.developer.githubUsername",
           kind: "text",
           label: "Your GitHub Username:",
-          visibleWhen: { field: "profile.type", operator: "equals", value: "developer" },
+          visibleWhen: { equals: { path: "profile.type", value: "developer" } },
+          validation: { required: true }
+        },
+        {
+          id: "dev_tier",
+          sectionId: "demo_sec",
+          branch: "b_dev",
+          path: "profile.developer.tier",
+          kind: "card",
+          label: "Select Sponsorship Tier:",
+          options: [
+            { value: "free", label: "Free Tier Contributor", hint: "Community access" },
+            { value: "sponsor", label: "Gold Sponsor", hint: "Custom tier with pledge" }
+          ],
+          visibleWhen: { equals: { path: "profile.type", value: "developer" } },
+          validation: { required: true }
+        },
+        {
+          id: "dev_sponsor_amount",
+          sectionId: "demo_sec",
+          branch: "b_dev_sponsor",
+          path: "profile.developer.sponsorAmount",
+          kind: "currency",
+          label: "Monthly Sponsorship Amount ($):",
+          visibleWhen: { all: [{ equals: { path: "profile.type", value: "developer" } }, { equals: { path: "profile.developer.tier", value: "sponsor" } }] },
           validation: { required: true }
         },
         {
           id: "company_domain",
           sectionId: "demo_sec",
+          branch: "b_ent",
           path: "profile.enterprise.workDomain",
           kind: "text",
           label: "Corporate Work Email Domain:",
-          visibleWhen: { field: "profile.type", operator: "equals", value: "enterprise" },
+          description: "e.g., acme.corp",
+          visibleWhen: { equals: { path: "profile.type", value: "enterprise" } },
+          validation: { required: true }
+        },
+        {
+          id: "company_seats",
+          sectionId: "demo_sec",
+          branch: "b_ent",
+          path: "profile.enterprise.seats",
+          kind: "number",
+          label: "Number of Licensed Seats:",
+          visibleWhen: { equals: { path: "profile.type", value: "enterprise" } },
           validation: { required: true }
         }
       ]
@@ -311,12 +366,19 @@ export const minimalBranchingSchema = {
   ],
   branches: [
     {
-      id: "profile_branch",
-      discriminatorPath: "profile.type",
-      ownedPaths: {
-        developer: ["profile.developer"],
-        enterprise: ["profile.enterprise"]
-      }
+      id: "b_dev",
+      activation: { equals: { path: "profile.type", value: "developer" } },
+      ownedPaths: ["profile.developer.githubUsername", "profile.developer.tier"]
+    },
+    {
+      id: "b_dev_sponsor",
+      activation: { all: [{ equals: { path: "profile.type", value: "developer" } }, { equals: { path: "profile.developer.tier", value: "sponsor" } }] },
+      ownedPaths: ["profile.developer.sponsorAmount"]
+    },
+    {
+      id: "b_ent",
+      activation: { equals: { path: "profile.type", value: "enterprise" } },
+      ownedPaths: ["profile.enterprise.workDomain", "profile.enterprise.seats"]
     }
   ]
 };
