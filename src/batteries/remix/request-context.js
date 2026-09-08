@@ -1,5 +1,5 @@
 import { createIntakeEngine } from "../../engine.js";
-import { serializeThetaState } from "./serialization.js";
+import { serializeThetaState, computeSchemaHash } from "./serialization.js";
 
 /**
  * Creates an isolated, request-scoped Theta IntakeEngine.
@@ -13,8 +13,12 @@ import { serializeThetaState } from "./serialization.js";
  * @param {import("../../storage.js").StorageAdapter} [options.storage] - Storage adapter
  * @returns {{
  *   engine: import("../../engine.js").IntakeEngine,
+ *   schema: import("../../schema.js").Schema,
+ *   schemaHash: string,
+ *   schemaMismatch: boolean,
  *   request: Request,
  *   getFacts: () => Record<string, any>,
+ *   getRevision: () => number,
  *   serialize: () => any,
  *   saveToSession: () => string
  * }}
@@ -26,30 +30,65 @@ export function createThetaRequestContext(options) {
     throw new Error("[createThetaRequestContext] 'schema' is required.");
   }
 
-  // Retrieve draft facts from session cookie if sessionStorage is provided
-  let loadedFacts = initialFacts || {};
-  if (!initialFacts && sessionStorage && request) {
-    loadedFacts = sessionStorage.getFacts(request);
+  const currentSchemaHash = computeSchemaHash(schema);
+  let sessionFacts = {};
+  let sessionRevision = 1;
+  let schemaMismatch = false;
+
+  if (initialFacts) {
+    sessionFacts = initialFacts;
+  } else if (sessionStorage && request) {
+    if (typeof sessionStorage.getSessionData === "function") {
+      const sessionData = sessionStorage.getSessionData(request);
+      if (sessionData.schemaHash && sessionData.schemaHash !== currentSchemaHash) {
+        // Schema mismatch detected (e.g. rolling deployment schema change).
+        // Reset facts to prevent out-of-date state invalidations.
+        schemaMismatch = true;
+        sessionFacts = {};
+        sessionRevision = 1;
+      } else {
+        sessionFacts = sessionData.facts || {};
+        sessionRevision = sessionData.revision || 1;
+      }
+    } else {
+      sessionFacts = sessionStorage.getFacts(request) || {};
+    }
   }
 
   // Create isolated synchronous engine instance for this request
   const engine = createIntakeEngine({
     schema,
-    initialFacts: loadedFacts,
+    initialState: {
+      facts: sessionFacts,
+      revision: sessionRevision,
+    },
     storage,
   });
 
   return {
     engine,
     schema,
+    schemaHash: currentSchemaHash,
+    schemaMismatch,
     request,
     getFacts: () => engine.getState().facts,
+    getRevision: () => (typeof engine.getRevision === "function" ? engine.getRevision() : engine.getState().revision),
     serialize: () => serializeThetaState(engine, schema),
     saveToSession: () => {
       if (!sessionStorage) {
         throw new Error("[saveToSession] No sessionStorage configured for request context.");
       }
-      return sessionStorage.commitFacts(engine.getState().facts);
+      const state = engine.getState();
+      const currentRev = typeof engine.getRevision === "function" ? engine.getRevision() : (state.revision || 1);
+      if (typeof sessionStorage.commitSession === "function") {
+        return sessionStorage.commitSession({
+          facts: state.facts,
+          revision: currentRev,
+          schemaHash: currentSchemaHash,
+        });
+      }
+      return sessionStorage.commitFacts(state.facts, currentRev, currentSchemaHash);
     },
   };
 }
+

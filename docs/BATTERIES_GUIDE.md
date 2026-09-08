@@ -119,7 +119,13 @@ Designed for Remix 2.x and React Router 7. Built entirely upon standard Web `Req
 ### Key Guarantees:
 1. **Zero Server State Contamination**: Every request gets an isolated, ephemeral engine instance via `createThetaRequestContext`.
 2. **True Progressive Enhancement**: Submitting `<Form method="post">` works with **zero client JavaScript** enabled.
-3. **Signed Draft Storage**: Facts are safely encrypted/signed into HTTP-only cookie sessions using HMAC-SHA256 via `createThetaCookieSessionStorage`.
+3. **Authenticated Draft Storage**: Draft state is cryptographically signed using HMAC-SHA256 via `createThetaCookieSessionStorage`.
+   > [!NOTE]
+   > HMAC provides cryptographic authenticity and tamper-detection (the client cannot alter facts, revision numbers, or schemas without invalidating the signature), but it does not provide confidentiality (payload is base64url-encoded JSON). If storing sensitive PII or credentials, use server-side session persistence or application-layer encryption.
+4. **Optimistic Concurrency Control**: Submissions track `_theta_revision` to detect concurrent/multi-tab submissions and return `409 Conflict` on race conditions.
+5. **Server-Authoritative Question Verification**: The server verifies that submitted answers correspond to eligible, active questions in the DAG, preventing sequence bypassing.
+6. **Schema Fingerprinting**: State payloads embed a `schemaHash` to detect rolling deployment version mismatches and prevent cross-version state corruption.
+
 
 ---
 
@@ -172,7 +178,7 @@ export default function IntakeRoute() {
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
 
-  const { activeQuestion, stats, actionError } = useRemixTheta({
+  const { activeQuestion, stats, actionError, engine } = useRemixTheta({
     loaderData,
     actionData,
   });
@@ -220,6 +226,7 @@ export default function IntakeRoute() {
       {/* Standard HTML Form: Works with or without JavaScript! */}
       <Form method="post">
         <input type="hidden" name="questionId" value={activeQuestion.id} />
+        <input type="hidden" name="_theta_revision" value={engine.getRevision()} />
 
         <label style={{ display: "block", fontWeight: "bold", marginBottom: "0.5rem" }}>
           {activeQuestion.label}
@@ -294,11 +301,13 @@ export default function IntakeRoute() {
 ### `theta-engine/remix`
 | Export | Type | Description |
 | :--- | :--- | :--- |
-| `createThetaCookieSessionStorage` | Factory | Encrypted HMAC-SHA256 cookie session storage |
-| `createThetaRequestContext` | Factory | Request-isolated engine instance for zero server leakage |
+| `createThetaCookieSessionStorage` | Factory | Authenticated HMAC-SHA256 cookie session storage with payload limits |
+| `createThetaRequestContext` | Factory | Request-isolated engine instance with schema verification |
 | `thetaLoader` | Helper | Dehydrates engine state & stats into SSR loaderData |
 | `thetaLoaderResponse` | Helper | Returns standard Web `Response` with JSON loaderData |
-| `thetaAction` | Helper | Handles HTML Form POST, validation, and branch invalidations |
-| `serializeThetaState` | Utility | Serializes engine state into transfer-safe JSON |
+| `thetaAction` | Helper | Handles HTML Form POST, optimistic concurrency, and DAG validation |
+| `computeSchemaHash` | Utility | Deterministic schema fingerprint generator for version drift protection |
+| `serializeThetaState` | Utility | Serializes engine state into transfer-safe JSON with revision & hash |
 | `hydrateThetaState` | Utility | Hydrates new engine instance from serialized state |
 | `useRemixTheta` | Hook | Client-side hydration hook bridging loader/action data |
+

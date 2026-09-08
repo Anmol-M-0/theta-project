@@ -4,6 +4,7 @@ import { createThetaEngine } from "../src/index.js";
 import {
   serializeThetaState,
   hydrateThetaState,
+  computeSchemaHash,
   createThetaCookieSessionStorage,
   createThetaRequestContext,
   thetaLoader,
@@ -273,4 +274,165 @@ describe("Theta Remix Batteries Subsystem", () => {
     assert.equal(res.headers.get("Location"), "/intake");
     assert.ok(res.headers.get("Set-Cookie").includes("Max-Age=0"));
   });
+
+  test("Phase 1 Hardening: computeSchemaHash produces stable deterministic fingerprints", () => {
+    const hash1 = computeSchemaHash(schema);
+    const hash2 = computeSchemaHash(schema);
+    assert.equal(typeof hash1, "string");
+    assert.equal(hash1.length, 16);
+    assert.equal(hash1, hash2);
+
+    // Alter schema slightly
+    const modifiedSchema = { ...schema, version: 2 };
+    const hashModified = computeSchemaHash(modifiedSchema);
+    assert.notEqual(hash1, hashModified);
+  });
+
+  test("Phase 1 Hardening: Server-Authoritative Question Verification (Rejects Inactive Branches & Sequence Tampering)", async () => {
+    const storage = createThetaCookieSessionStorage({ secret: "test-secret" });
+
+    // 1. Try to answer 'floor_num' directly when 'prop_type' is not yet answered (ineligible branch)
+    const form1 = new FormData();
+    form1.set("questionId", "floor_num");
+    form1.set("value", "10");
+
+    const req1 = new Request("http://localhost:3000/intake", {
+      method: "POST",
+      body: form1,
+    });
+
+    const res1 = await thetaAction({ request: req1, schema, sessionStorage: storage });
+    assert.equal(res1.status, 400);
+    const body1 = await res1.json();
+    assert.equal(body1.ok, false);
+    assert.ok(body1.error.includes("is currently ineligible"));
+
+    // 2. Multi-root schema test: answering Q2 before Q1 when both are eligible
+    const multiRootSchema = {
+      id: "multi_root",
+      version: 1,
+      sections: [{
+        id: "s1",
+        title: "Section 1",
+        questions: [
+          { id: "q1", path: "ans.q1", kind: "text", label: "Q1" },
+          { id: "q2", path: "ans.q2", kind: "text", label: "Q2" },
+        ],
+      }],
+    };
+
+    const form2 = new FormData();
+    form2.set("questionId", "q2"); // Skip Q1
+    form2.set("value", "skip");
+
+    const req2 = new Request("http://localhost:3000/intake", {
+      method: "POST",
+      body: form2,
+    });
+
+    const res2 = await thetaAction({ request: req2, schema: multiRootSchema, sessionStorage: storage });
+    assert.equal(res2.status, 400);
+    const body2 = await res2.json();
+    assert.equal(body2.ok, false);
+    assert.ok(body2.error.includes("is not the currently active question"));
+    assert.equal(body2.expectedQuestionId, "q1");
+  });
+
+  test("Phase 1 Hardening: Optimistic Concurrency Control (Rejects Stale Submissions with 409 Conflict)", async () => {
+    const storage = createThetaCookieSessionStorage({ secret: "test-secret" });
+
+    // 1. Initial valid submission: answer prop_type = apartment (starts at revision 1, transitions to revision 2)
+    const form1 = new FormData();
+    form1.set("questionId", "prop_type");
+    form1.set("value", "apartment");
+    form1.set("_theta_revision", "1");
+
+    const req1 = new Request("http://localhost:3000/intake", {
+      method: "POST",
+      body: form1,
+    });
+
+    const res1 = await thetaAction({ request: req1, schema, sessionStorage: storage });
+    assert.equal(res1.status, 200);
+    const body1 = await res1.json();
+    assert.equal(body1.revision, 2);
+    const cookieHeader = res1.headers.get("Set-Cookie").split(";")[0];
+
+    // 2. Stale submission attempt: client submits floor_num with stale revision 1 (expected 2)
+    const staleForm = new FormData();
+    staleForm.set("questionId", "floor_num");
+    staleForm.set("value", "5");
+    staleForm.set("_theta_revision", "1"); // Stale!
+
+    const staleReq = new Request("http://localhost:3000/intake", {
+      method: "POST",
+      headers: { cookie: cookieHeader },
+      body: staleForm,
+    });
+
+    const staleRes = await thetaAction({ request: staleReq, schema, sessionStorage: storage });
+    assert.equal(staleRes.status, 409); // Conflict!
+    const staleBody = await staleRes.json();
+    assert.equal(staleBody.ok, false);
+    assert.ok(staleBody.error.includes("Concurrency conflict"));
+    assert.equal(staleBody.expectedRevision, 2);
+    assert.equal(staleBody.submittedRevision, 1);
+
+    // 3. Fresh submission with correct revision 2: succeeds and bumps to revision 3
+    const freshForm = new FormData();
+    freshForm.set("questionId", "floor_num");
+    freshForm.set("value", "5");
+    freshForm.set("_theta_revision", "2"); // Fresh!
+
+    const freshReq = new Request("http://localhost:3000/intake", {
+      method: "POST",
+      headers: { cookie: cookieHeader },
+      body: freshForm,
+    });
+
+    const freshRes = await thetaAction({ request: freshReq, schema, sessionStorage: storage });
+    assert.equal(freshRes.status, 200);
+    const freshBody = await freshRes.json();
+    assert.equal(freshBody.ok, true);
+    assert.equal(freshBody.revision, 3);
+  });
+
+  test("Phase 1 Hardening: Schema Fingerprinting & Rolling Deployment Isolation", () => {
+    const storage = createThetaCookieSessionStorage({ secret: "test-secret" });
+
+    // Persist a session created under Schema v1
+    const cookieHeader = storage.commitSession({
+      facts: { property: { type: "apartment", apartment: { floor: 10 } } },
+      revision: 2,
+      schemaHash: "schema_v1_fingerprint",
+    });
+
+    const req = new Request("http://localhost:3000/intake", {
+      headers: { cookie: cookieHeader.split(";")[0] },
+    });
+
+    // Load request context with current schema (whose hash is different)
+    const ctx = createThetaRequestContext({ request: req, schema, sessionStorage: storage });
+    assert.equal(ctx.schemaMismatch, true);
+    // Stale facts dropped to prevent corrupting state with new schema
+    assert.deepEqual(ctx.getFacts(), {});
+    assert.equal(ctx.getRevision(), 1);
+  });
+
+  test("Phase 1 Hardening: Cookie Storage enforces maxPayloadBytes limit", () => {
+    const storage = createThetaCookieSessionStorage({
+      secret: "test-secret",
+      maxPayloadBytes: 100, // Artificially small budget
+    });
+
+    assert.throws(
+      () => {
+        storage.commitSession({
+          facts: { largePayload: "x".repeat(200) },
+        });
+      },
+      /exceeds maxPayloadBytes limit/
+    );
+  });
 });
+

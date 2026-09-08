@@ -7,23 +7,35 @@ import type { StoreAdapter } from "../../adapter.js";
 export interface SerializedThetaState {
   schemaId: string;
   version: number;
+  schemaHash?: string;
   revision: number;
   facts: Record<string, any>;
   history?: any[];
 }
 
-export function serializeThetaState(engine: IntakeEngine): SerializedThetaState;
+export function computeSchemaHash(schema: Schema): string;
+
+export function serializeThetaState(engine: IntakeEngine, schema?: Schema | null): SerializedThetaState;
 
 export function hydrateThetaState(options: {
   schema: Schema;
   serializedState: Partial<SerializedThetaState>;
   storage?: StorageAdapter;
+  strictSchema?: boolean;
 }): IntakeEngine;
+
+export interface ThetaCookieSessionData {
+  facts: Record<string, any>;
+  revision: number;
+  schemaHash: string | null;
+}
 
 export interface ThetaCookieSessionStorage {
   cookieName: string;
+  getSessionData: (requestOrCookieHeader: Request | string | null) => ThetaCookieSessionData;
   getFacts: (requestOrCookieHeader: Request | string | null) => Record<string, any>;
-  commitFacts: (facts: Record<string, any>) => string;
+  commitSession: (session: { facts?: Record<string, any>; revision?: number; schemaHash?: string | null }) => string;
+  commitFacts: (facts: Record<string, any>, revision?: number, schemaHash?: string | null) => string;
   destroySession: () => string;
 }
 
@@ -35,15 +47,21 @@ export function createThetaCookieSessionStorage(options?: {
   sameSite?: "Lax" | "Strict" | "None";
   httpOnly?: boolean;
   secure?: boolean;
+  maxPayloadBytes?: number;
 }): ThetaCookieSessionStorage;
 
 export interface ThetaRequestContext {
   engine: IntakeEngine;
+  schema: Schema;
+  schemaHash: string;
+  schemaMismatch: boolean;
   request: Request;
   getFacts: () => Record<string, any>;
+  getRevision: () => number;
   serialize: () => SerializedThetaState;
   saveToSession: () => string;
 }
+
 
 export function createThetaRequestContext(options: {
   request: Request;

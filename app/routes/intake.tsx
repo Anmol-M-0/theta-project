@@ -76,6 +76,7 @@ export default function IntakeRoute() {
               {!isComplete ? (
                 <QuestionCard
                   question={activeQuestion}
+                  revision={engine.getRevision()}
                   actionError={actionError}
                   isSubmitting={isSubmitting}
                 />

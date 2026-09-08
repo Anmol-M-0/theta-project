@@ -1,4 +1,5 @@
 import { createThetaRequestContext } from "./request-context.js";
+import { isQuestionEligible, isQuestionAnswered } from "../../projections.js";
 
 /**
  * Server-side action handler for Remix intake forms.
@@ -29,6 +30,21 @@ export async function thetaAction(options) {
   const formData = await request.formData();
   const actionType = (formData.get("_action") || "commit").toString();
 
+  // Optimistic Concurrency Control: verify submitted revision if provided
+  const submittedRevRaw = formData.get("_theta_revision") ?? formData.get("revision");
+  if (submittedRevRaw !== null && submittedRevRaw !== undefined && submittedRevRaw !== "") {
+    const submittedRevision = parseInt(submittedRevRaw.toString(), 10);
+    const currentRevision = ctx.getRevision();
+    if (!isNaN(submittedRevision) && submittedRevision !== currentRevision) {
+      return jsonError({
+        ok: false,
+        error: `Concurrency conflict: Submitted revision (${submittedRevision}) does not match current state revision (${currentRevision}).`,
+        expectedRevision: currentRevision,
+        submittedRevision,
+      }, 409);
+    }
+  }
+
   const headers = new Headers();
 
   // 1. Reset Action
@@ -55,8 +71,7 @@ export async function thetaAction(options) {
     }
 
     ctx.engine.dispatch({ type: "JUMP_TO_QUESTION", questionId, scopeIndex });
-    const setCookie = sessionStorage.commitFacts(ctx.engine.getFacts());
-    headers.set("Set-Cookie", setCookie);
+    headers.set("Set-Cookie", ctx.saveToSession());
 
     if (redirectTo) {
       return redirectWithHeaders(redirectTo, headers);
@@ -64,6 +79,7 @@ export async function thetaAction(options) {
 
     return jsonSuccess({
       ok: true,
+      revision: ctx.getRevision(),
       activeQuestion: ctx.engine.getActiveQuestion(),
       stats: ctx.engine.getReviewTree().stats,
     }, headers);
@@ -78,7 +94,7 @@ export async function thetaAction(options) {
     }
 
     ctx.engine.dispatch({ type: "DELETE_ANSWER", questionId, path });
-    headers.set("Set-Cookie", sessionStorage.commitFacts(ctx.engine.getState().facts));
+    headers.set("Set-Cookie", ctx.saveToSession());
 
     if (redirectTo) {
       return redirectWithHeaders(redirectTo, headers);
@@ -86,6 +102,7 @@ export async function thetaAction(options) {
 
     return jsonSuccess({
       ok: true,
+      revision: ctx.getRevision(),
       activeQuestion: ctx.engine.getActiveQuestion(),
       stats: ctx.engine.getReviewTree().stats,
     }, headers);
@@ -95,6 +112,37 @@ export async function thetaAction(options) {
   const questionId = formData.get("questionId")?.toString();
   if (!questionId) {
     return jsonError({ error: "Missing 'questionId' in submission." }, 400);
+  }
+
+  const targetQuestion = findQuestionInSchema(schema, questionId);
+  if (!targetQuestion) {
+    return jsonError({ ok: false, error: `Question '${questionId}' not found in schema.` }, 400);
+  }
+
+  // Server-Authoritative Question Verification:
+  // 1. Question must be eligible under current DAG conditions (not on an inactive/dormant branch)
+  const currentFacts = ctx.engine.getState().facts;
+  const isEligible = isQuestionEligible(targetQuestion, currentFacts);
+  if (!isEligible) {
+    return jsonError({
+      ok: false,
+      error: `Invalid transition: Question '${questionId}' is currently ineligible under active DAG conditions.`,
+      questionId,
+      activeQuestion: ctx.engine.getActiveQuestion(),
+    }, 400);
+  }
+
+  // 2. If the question is not yet answered, it must be the currently active question (prevents skipping ahead)
+  const currentActive = ctx.engine.getActiveQuestion();
+  const isAnswered = isQuestionAnswered(targetQuestion, currentFacts);
+  if (!isAnswered && currentActive && currentActive.id !== questionId) {
+    return jsonError({
+      ok: false,
+      error: `Invalid transition: Question '${questionId}' is not the currently active question. Expected '${currentActive.id}'.`,
+      expectedQuestionId: currentActive.id,
+      submittedQuestionId: questionId,
+      activeQuestion: currentActive,
+    }, 400);
   }
 
   const rawValue = formData.get("value");
@@ -120,10 +168,10 @@ export async function thetaAction(options) {
     }, 400);
   }
 
-  // Update session cookie with committed canonical facts
-  const updatedFacts = ctx.engine.getState().facts;
-  headers.set("Set-Cookie", sessionStorage.commitFacts(updatedFacts));
+  // Update session cookie with committed canonical facts and revision
+  headers.set("Set-Cookie", ctx.saveToSession());
 
+  const updatedFacts = ctx.engine.getState().facts;
   const activeQuestion = ctx.engine.getActiveQuestion();
   const isComplete = activeQuestion === null;
 
@@ -144,10 +192,12 @@ export async function thetaAction(options) {
   return jsonSuccess({
     ok: true,
     isComplete,
+    revision: ctx.getRevision(),
     activeQuestion,
     stats: ctx.engine.getReviewTree().stats,
     facts: updatedFacts,
   }, headers);
+
 }
 
 function coerceValue(rawVal, questionId, schema) {

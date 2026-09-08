@@ -3,11 +3,12 @@ import { Form } from "@remix-run/react";
 
 interface QuestionCardProps {
   question: any;
+  revision?: number;
   actionError?: string | null;
   isSubmitting?: boolean;
 }
 
-export function QuestionCard({ question, actionError, isSubmitting = false }: QuestionCardProps) {
+export function QuestionCard({ question, revision, actionError, isSubmitting = false }: QuestionCardProps) {
   const [selectedVal, setSelectedVal] = useState<any>(question?.value ?? "");
 
   // Update local selection when question changes
@@ -51,6 +52,8 @@ export function QuestionCard({ question, actionError, isSubmitting = false }: Qu
         <input type="hidden" name="_action" value="commit" />
         <input type="hidden" name="questionId" value={question.id} />
         {question.path && <input type="hidden" name="path" value={question.path} />}
+        {typeof revision === "number" && <input type="hidden" name="_theta_revision" value={revision} />}
+
 
         <div style={{ marginBottom: "1.5rem" }}>
           <h2 style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--text-primary)", marginBottom: "0.5rem" }}>
