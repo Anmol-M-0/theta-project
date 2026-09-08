@@ -101,6 +101,9 @@
     "build:js": "mkdir -p dist && cp -r src/* dist/",
     "test": "node --test tests/*.test.js",
     "test:watch": "node --test --watch tests/*.test.js",
+    "dev": "remix vite:dev",
+    "build:remix": "remix vite:build",
+    "start": "remix-serve ./build/server/index.js",
     "prepack": "npm run build",
     "build:playground": "node scripts/bundle-playground.mjs"
   },
@@ -126,10 +129,17 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "devDependencies": {
-    "@types/react": "^18.3.31",
+  "dependencies": {
+    "@remix-run/node": "^2.17.5",
+    "@remix-run/react": "^2.17.5",
+    "@remix-run/serve": "^2.17.5",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "typescript": "^5.9.3"
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@remix-run/dev": "^2.17.5",
+    "@types/react": "^18.3.31",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3"
   }
 }
