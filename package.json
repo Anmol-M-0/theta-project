@@ -78,6 +78,14 @@
       "types": "./dist/projections.d.ts",
       "default": "./dist/projections.js"
     },
+    "./react": {
+      "types": "./dist/batteries/react/index.d.ts",
+      "default": "./dist/batteries/react/index.js"
+    },
+    "./remix": {
+      "types": "./dist/batteries/remix/index.d.ts",
+      "default": "./dist/batteries/remix/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -90,7 +98,7 @@
     "build": "npm run clean && npm run build:types && npm run build:js",
     "clean": "rm -rf dist",
     "build:types": "tsc",
-    "build:js": "mkdir -p dist && cp src/*.js dist/",
+    "build:js": "mkdir -p dist && cp -r src/* dist/",
     "test": "node --test tests/*.test.js",
     "test:watch": "node --test --watch tests/*.test.js",
     "prepack": "npm run build",
@@ -119,6 +127,9 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@types/react": "^18.3.31",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.9.3"
   }
 }
