@@ -7,7 +7,7 @@ yarn-error.log*
 coverage/
 .dist/
 .chatgpt-automation-runs
-docs/*
+docs/consultations/
 dist/
 playground/
 scratch

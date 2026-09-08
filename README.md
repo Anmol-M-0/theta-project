@@ -224,6 +224,20 @@ npm run test:watch
 
 ---
 
+## Versioning & Git Tagging Policy
+
+Theta Engine strictly adheres to [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PATCH`).
+
+Starting with `v0.5.0`, all formal releases are published through **annotated, immutable Git tags** (`vMAJOR.MINOR.PATCH`) that trigger automated provenance-attested distribution across npm, JSR, and GitHub Releases:
+
+- **Annotated & Signed Releases**: Releases use annotated Git tags (`git tag -a vX.Y.Z -m "..."`). Lightweight tags are never used for production milestones.
+- **Tag Immutability**: Once pushed, release tags are permanently immutable. Tags are never deleted, overwritten, or force-pushed. Defects are resolved by fixing forward with a new patch version (`v0.5.1`).
+- **Downstream Stability**: Minor releases (`0.X.0`) with breaking changes are accompanied by migration guides and backward-compatible migration tools, while patch releases (`0.X.Y`) guarantee zero semantic regressions.
+
+For comprehensive details on tag naming, invariant compatibility rules, release candidate channels, and registry publishing, see [docs/TAGGING_POLICY.md](docs/TAGGING_POLICY.md).
+
+---
+
 ## License
 
 [MIT](LICENSE) © [Anmol Maniyar](https://github.com/Anmol-M-0)
